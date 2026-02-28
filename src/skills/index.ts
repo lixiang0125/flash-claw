@@ -21,7 +21,21 @@ export interface Skill {
   scripts: Record<string, string>;
 }
 
-const SKILLS_DIR = path.join(process.cwd(), "skills");
+const SKILL_DIRS = [
+  path.join(process.cwd(), "flashclaw/skills"),
+  path.join(process.cwd(), "agents/skills"),
+];
+
+function findSkillsDir(): string | null {
+  for (const dir of SKILL_DIRS) {
+    if (fs.existsSync(dir)) {
+      return dir;
+    }
+  }
+  return SKILL_DIRS[0];
+}
+
+const SKILLS_DIR = findSkillsDir();
 
 /**
  * 解析 YAML frontmatter

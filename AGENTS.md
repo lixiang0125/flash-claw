@@ -56,8 +56,12 @@ bun run release
 
 ### 目录结构
 
+Skills 放在以下目录（按优先级）:
+1. `./flashclaw/skills/`
+2. `./agents/skills/`
+
 ```
-skills/
+flashclaw/skills/  (或 agents/skills/)
 ├── skill-name/
 │   ├── SKILL.md          # 必需：Skill 定义
 │   ├── scripts/          # 可选：可执行脚本
