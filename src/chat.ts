@@ -12,9 +12,30 @@ export interface ChatResponse {
   response: string;
   sessionId: string;
   skills?: Skill[];
+  autoMatched?: string;
 }
 
 const useQwen = !!process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.includes("dashscope");
+
+/**
+ * 检查消息是否匹配 skill 描述关键词
+ */
+function matchSkillByMessage(message: string, skills: Skill[]): Skill | null {
+  const lowerMessage = message.toLowerCase();
+  
+  for (const skill of skills) {
+    if (skill.disable_model_invocation) continue;
+    
+    const keywords = skill.description.toLowerCase().split(/[,，、\s]+/).filter(Boolean);
+    for (const keyword of keywords) {
+      if (keyword.length > 2 && lowerMessage.includes(keyword)) {
+        return skill;
+      }
+    }
+  }
+  
+  return null;
+}
 
 class ChatEngine {
   private llm: ChatOpenAI;
@@ -51,15 +72,25 @@ class ChatEngine {
     return this.sessionSkills.get(sessionId)!;
   }
 
+  private canUseSkill(skill: Skill, explicit: boolean): boolean {
+    if (explicit && skill.disable_user_invocation) {
+      return false;
+    }
+    if (!explicit && skill.disable_model_invocation) {
+      return false;
+    }
+    return true;
+  }
+
   private buildSystemMessage(sessionId: string): string {
     const skills = this.getSessionSkills(sessionId);
-    const availableSkills = listSkills();
+    const availableSkills = listSkills().filter(s => !s.disable_model_invocation);
     
     let systemPrompt = "You are a helpful AI assistant.";
     
     if (availableSkills.length > 0) {
       systemPrompt += "\n\n## Available Skills\n";
-      systemPrompt += "You can use skills to help with specific tasks. Use the 'skill' parameter to load a skill.\n";
+      systemPrompt += "When user asks about these topics, you should activate the relevant skill.\n";
       
       for (const skill of availableSkills) {
         systemPrompt += `\n### ${skill.name}\n`;
@@ -69,6 +100,8 @@ class ChatEngine {
     
     if (skills.length > 0) {
       systemPrompt += "\n\n## Active Skills\n";
+      systemPrompt += "The following skills are active for this conversation:\n";
+      
       for (const skill of skills) {
         systemPrompt += `\n### ${skill.name}\n`;
         systemPrompt += `${skill.instructions}\n`;
@@ -85,14 +118,22 @@ class ChatEngine {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const sessionId = request.sessionId || "default";
     const history = this.getHistory(sessionId);
+    const sessionSkills = this.getSessionSkills(sessionId);
+    const availableSkills = listSkills();
+    let autoMatched: string | undefined;
     
     if (request.skill) {
       const skill = getSkill(request.skill);
-      if (skill) {
-        const sessionSkills = this.getSessionSkills(sessionId);
+      if (skill && this.canUseSkill(skill, true)) {
         if (!sessionSkills.find(s => s.name === skill.name)) {
           sessionSkills.push(skill);
         }
+      }
+    } else {
+      const matchedSkill = matchSkillByMessage(request.message, availableSkills);
+      if (matchedSkill && !sessionSkills.find(s => s.name === matchedSkill.name)) {
+        sessionSkills.push(matchedSkill);
+        autoMatched = matchedSkill.name;
       }
     }
 
@@ -108,6 +149,7 @@ class ChatEngine {
       response: response.content as string,
       sessionId,
       skills: this.getSessionSkills(sessionId),
+      autoMatched,
     };
   }
 

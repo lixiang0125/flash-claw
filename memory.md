@@ -91,3 +91,18 @@
   - `skills/code-review/`: 代码审查助手
   - `skills/doc-writer/`: 文档编写助手
 - 前端添加 Skill 选择器
+
+## 2024-03-01 - 重构 Skill 系统符合 Claude Code 标准
+
+**目的**: 使用 Claude Code Agent Skills 标准格式
+
+**改造点**:
+- `SKILL.md` 格式替换 `skill.json`
+  - YAML frontmatter: name, description, allowed_tools 等
+  - Markdown 指令内容
+- 支持 `scripts/` 目录: 可执行脚本 (sh, py, js)
+- 支持 `references/` 目录: 参考文档
+- 添加 `POST /api/skills/:name/exec` 执行脚本
+- 新增示例 Skills:
+  - `skills/git-commit/`: Git 提交助手
+- 移除旧的 `skill.json` 文件
