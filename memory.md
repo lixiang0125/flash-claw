@@ -42,3 +42,15 @@
   - 生成 CHANGELOG.md
   - 自动 git commit 并 push
 - `package.json` 添加 `bun run release` 命令
+
+## 2024-03-01 - 梳理项目结构
+
+**目的**: 整理项目文件，更新文档
+
+**改造点**:
+- 删除旧 placeholder 文件 `index.ts`
+- 更新 `README.md`: 完整的项目文档
+  - 技术栈说明
+  - 快速开始指南
+  - API 接口文档
+  - 项目结构说明
