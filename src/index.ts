@@ -1,12 +1,15 @@
 import "dotenv/config";
 import { Hono } from "hono";
+import { serveStatic } from "hono/bun";
 import { chatEngine, type ChatRequest } from "./chat";
 
 const app = new Hono();
 
+app.use("/*", serveStatic({ root: "./dist" }));
+
 app.get("/", (c) => c.text("Flash Claw Chat API"));
 
-app.post("/chat", async (c) => {
+app.post("/api/chat", async (c) => {
   const body = await c.req.json<ChatRequest>();
   
   if (!body.message) {
@@ -22,7 +25,7 @@ app.post("/chat", async (c) => {
   }
 });
 
-app.post("/chat/clear", async (c) => {
+app.post("/api/chat/clear", async (c) => {
   const body = await c.req.json<{ sessionId: string }>();
   
   if (!body.sessionId) {

@@ -54,3 +54,19 @@
   - 快速开始指南
   - API 接口文档
   - 项目结构说明
+
+## 2024-03-01 - 添加 Chat UI 页面
+
+**目的**: 提供可视化的聊天界面
+
+**改造点**:
+- 创建 `src/web/`: React 前端项目
+  - `components/`: UI 组件 (Header, MessageList, MessageInput, TypingIndicator)
+  - `hooks/useChat.ts`: 聊天逻辑 hook
+  - `api/chat.ts`: API 服务层
+  - `types/index.ts`: 类型定义
+- 安装 React 相关依赖: react, react-dom, vite, @vitejs/plugin-react
+- 创建 `vite.config.mts`: Vite 配置
+- 创建 `scripts/build-web.ts`: 前端构建脚本
+- 修改 `src/index.ts`: API 路径改为 `/api/*`，静态文件指向 `dist/`
+- 删除旧的 `public/` 文件夹

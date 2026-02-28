@@ -6,6 +6,14 @@
 - 使用 Hono 构建 REST API
 - 使用 LangChain 接入大模型
 
+## 前端开发
+
+- UI 使用 React 实现
+- 代码维护在 `/src/web` 目录
+- 组件化开发，保持代码组织合理
+- 核心位置需补充注释
+- 使用 Vite 构建前端
+
 ## 环境变量
 
 - 所有敏感配置存储在 `.env` 中
@@ -35,5 +43,6 @@ bun run release
 | 方法 | 路径 | 描述 |
 |------|------|------|
 | GET | / | 健康检查 |
-| POST | /chat | 对话接口 |
-| POST | /chat/clear | 清除会话 |
+| GET | /index.html | 前端页面 |
+| POST | /api/chat | 对话接口 |
+| POST | /api/chat/clear | 清除会话 |
