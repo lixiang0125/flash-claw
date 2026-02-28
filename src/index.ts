@@ -2,7 +2,7 @@ import "dotenv/config";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { chatEngine, type ChatRequest } from "./chat";
-import { listSkills, searchSkills, getSkill } from "./skills";
+import { listSkills, searchSkills, getSkill, executeScript } from "./skills";
 
 const app = new Hono();
 
@@ -52,6 +52,22 @@ app.get("/api/skills/:name", (c) => {
     return c.json({ error: "Skill not found" }, 404);
   }
   return c.json(skill);
+});
+
+app.post("/api/skills/:name/exec", async (c) => {
+  const name = c.req.param("name");
+  const { script, args } = await c.req.json<{ script: string; args?: string[] }>();
+  
+  if (!script) {
+    return c.json({ error: "script name is required" }, 400);
+  }
+
+  const result = executeScript(name, script, args || []);
+  if (!result) {
+    return c.json({ error: "Script not found" }, 404);
+  }
+  
+  return c.json(result);
 });
 
 export default {

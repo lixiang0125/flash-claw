@@ -46,3 +46,47 @@ bun run release
 | GET | /index.html | 前端页面 |
 | POST | /api/chat | 对话接口 |
 | POST | /api/chat/clear | 清除会话 |
+| GET | /api/skills | 列出所有 Skills |
+| GET | /api/skills/:name | 获取指定 Skill |
+| POST | /api/skills/:name/exec | 执行 Skill 脚本 |
+
+## Skill 系统
+
+符合 Claude Code Agent Skills 标准。
+
+### 目录结构
+
+```
+skills/
+├── skill-name/
+│   ├── SKILL.md          # 必需：Skill 定义
+│   ├── scripts/          # 可选：可执行脚本
+│   │   ├── script.sh
+│   │   └── script.py
+│   ├── references/      # 可选：参考文档
+│   │   └── guide.md
+│   └── assets/          # 可选：静态资源
+```
+
+### SKILL.md 格式
+
+```yaml
+---
+name: skill-name
+description: Skill 描述，说明何时使用
+allowed_tools: Bash,Read,Write,Edit
+---
+
+# Skill 指令
+
+这里是详细的技能指令...
+```
+
+### Frontmatter 字段
+
+- `name`: 唯一标识符（小写字母、数字、短横线）
+- `description`: 描述（说明何时触发，最大 1024 字符）
+- `version`: 版本号（可选）
+- `allowed_tools`: 允许使用的工具列表
+- `disable_user_invocation`: 禁止用户调用
+- `disable_model_invocation`: 禁止模型自动调用

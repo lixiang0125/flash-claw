@@ -72,8 +72,9 @@ class ChatEngine {
       for (const skill of skills) {
         systemPrompt += `\n### ${skill.name}\n`;
         systemPrompt += `${skill.instructions}\n`;
-        if (skill.examples?.length) {
-          systemPrompt += `\nExamples:\n${skill.examples.join("\n")}\n`;
+        if (skill.references?.length) {
+          systemPrompt += `\n### References\n`;
+          systemPrompt += skill.references.join("\n\n") + "\n";
         }
       }
     }
