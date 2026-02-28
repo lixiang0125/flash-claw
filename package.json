@@ -1,0 +1,23 @@
+{
+  "name": "flash-claw",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "release": "bun run scripts/release.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@langchain/openai": "^1.2.11",
+    "dotenv": "^17.3.1",
+    "hono": "^4.12.3",
+    "langchain": "^1.2.28"
+  }
+}
