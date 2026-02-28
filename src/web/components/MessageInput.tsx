@@ -1,12 +1,13 @@
 interface MessageInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, skill?: string) => void;
   disabled: boolean;
+  skill?: string;
 }
 
 /**
  * 消息输入组件
  */
-export function MessageInput({ onSend, disabled }: MessageInputProps) {
+export function MessageInput({ onSend, disabled, skill }: MessageInputProps) {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -14,7 +15,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
     const value = input.value.trim();
     
     if (value) {
-      onSend(value);
+      onSend(value, skill);
       input.value = '';
     }
   };
@@ -25,7 +26,7 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
       const input = e.currentTarget as HTMLInputElement;
       const value = input.value.trim();
       if (value) {
-        onSend(value);
+        onSend(value, skill);
         input.value = '';
       }
     }

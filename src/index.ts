@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { chatEngine, type ChatRequest } from "./chat";
+import { listSkills, searchSkills, getSkill } from "./skills";
 
 const app = new Hono();
 
@@ -34,6 +35,23 @@ app.post("/api/chat/clear", async (c) => {
 
   chatEngine.clearSession(body.sessionId);
   return c.json({ success: true });
+});
+
+app.get("/api/skills", (c) => {
+  const query = c.req.query("q");
+  if (query) {
+    return c.json(searchSkills(query));
+  }
+  return c.json(listSkills());
+});
+
+app.get("/api/skills/:name", (c) => {
+  const name = c.req.param("name");
+  const skill = getSkill(name);
+  if (!skill) {
+    return c.json({ error: "Skill not found" }, 404);
+  }
+  return c.json(skill);
 });
 
 export default {

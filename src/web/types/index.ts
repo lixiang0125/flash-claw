@@ -14,6 +14,7 @@ export interface Message {
 export interface ChatRequest {
   message: string;
   sessionId?: string;
+  skill?: string;
 }
 
 /**
@@ -22,4 +23,15 @@ export interface ChatRequest {
 export interface ChatResponse {
   response: string;
   sessionId: string;
+  skills?: Skill[];
+}
+
+/**
+ * Skill 类型
+ */
+export interface Skill {
+  name: string;
+  description: string;
+  instructions?: string;
+  examples?: string[];
 }

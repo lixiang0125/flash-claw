@@ -70,3 +70,24 @@
 - 创建 `scripts/build-web.ts`: 前端构建脚本
 - 修改 `src/index.ts`: API 路径改为 `/api/*`，静态文件指向 `dist/`
 - 删除旧的 `public/` 文件夹
+
+## 2024-03-01 - Skill 执行系统
+
+**目的**: 添加类似 OpenCode 的 skill 执行能力，让 AI 可以在对话中加载并使用预设的技能
+
+**改造点**:
+- 创建 `src/skills/index.ts`: Skill 核心模块
+  - `listSkills()`: 列出所有可用 Skills
+  - `getSkill(name)`: 获取指定 Skill
+  - `searchSkills(query)`: 搜索 Skills
+- 修改 `src/chat.ts`: 集成 Skill 系统
+  - 支持通过 `skill` 参数加载 Skill
+  - 会话级别的 Skill 状态管理
+  - System Message 中注入 Skill 指令
+- 添加 Skill API 端点:
+  - `GET /api/skills`: 列出所有 Skills
+  - `GET /api/skills/:name`: 获取指定 Skill
+- 创建示例 Skills:
+  - `skills/code-review/`: 代码审查助手
+  - `skills/doc-writer/`: 文档编写助手
+- 前端添加 Skill 选择器

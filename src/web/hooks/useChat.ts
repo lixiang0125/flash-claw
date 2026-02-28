@@ -26,7 +26,7 @@ export function useChat() {
   /**
    * 发送消息
    */
-  const send = useCallback(async (content: string) => {
+  const send = useCallback(async (content: string, skill?: string) => {
     const userMessage: Message = {
       id: generateId(),
       content,
@@ -38,7 +38,7 @@ export function useChat() {
     setIsLoading(true);
 
     try {
-      const response = await sendMessage({ message: content, sessionId });
+      const response = await sendMessage({ message: content, sessionId, skill });
       
       const assistantMessage: Message = {
         id: generateId(),
