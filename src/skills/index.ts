@@ -21,21 +21,33 @@ export interface Skill {
   scripts: Record<string, string>;
 }
 
-const SKILL_DIRS = [
-  path.join(process.cwd(), "flashclaw/skills"),
-  path.join(process.cwd(), "agents/skills"),
-];
-
-function findSkillsDir(): string | null {
-  for (const dir of SKILL_DIRS) {
-    if (fs.existsSync(dir)) {
-      return dir;
+/**
+ * 搜索 Skills 的目录列表
+ * 优先级从高到低：
+ * 1. .flashclaw/skills/ (项目级)
+ * 2. .agents/skills/ (项目级)
+ * 3. 向上查找父目录的相同路径
+ */
+function findSkillsDirs(): string[] {
+  const dirs: string[] = [];
+  const candidates = [".flashclaw/skills", ".agents/skills"];
+  
+  let currentDir = process.cwd();
+  
+  while (currentDir && currentDir !== path.dirname(currentDir)) {
+    for (const candidate of candidates) {
+      const fullPath = path.join(currentDir, candidate);
+      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+        dirs.push(fullPath);
+      }
     }
+    currentDir = path.dirname(currentDir);
   }
-  return SKILL_DIRS[0];
+  
+  return dirs;
 }
 
-const SKILLS_DIR = findSkillsDir();
+const SKILLS_BASE_DIRS = findSkillsDirs();
 
 /**
  * 解析 YAML frontmatter
@@ -73,19 +85,22 @@ function parseFrontmatter(content: string): { meta: SkillMeta; content: string }
  * 列出所有可用的 Skills
  */
 export function listSkills(): Skill[] {
-  if (!fs.existsSync(SKILLS_DIR)) {
-    return [];
-  }
-
-  const dirs = fs.readdirSync(SKILLS_DIR, { withFileTypes: true });
   const skills: Skill[] = [];
+  const seen = new Set<string>();
 
-  for (const dir of dirs) {
-    if (!dir.isDirectory()) continue;
+  for (const baseDir of SKILLS_BASE_DIRS) {
+    if (!fs.existsSync(baseDir)) continue;
 
-    const skill = loadSkill(dir.name);
-    if (skill) {
-      skills.push(skill);
+    const dirs = fs.readdirSync(baseDir, { withFileTypes: true });
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue;
+      if (seen.has(dir.name)) continue;
+
+      const skill = loadSkillFromDir(baseDir, dir.name);
+      if (skill) {
+        seen.add(dir.name);
+        skills.push(skill);
+      }
     }
   }
 
@@ -96,14 +111,18 @@ export function listSkills(): Skill[] {
  * 加载指定 Skill
  */
 export function getSkill(name: string): Skill | null {
-  return loadSkill(name);
+  for (const baseDir of SKILLS_BASE_DIRS) {
+    const skill = loadSkillFromDir(baseDir, name);
+    if (skill) return skill;
+  }
+  return null;
 }
 
 /**
- * 加载 Skill 及其资源
+ * 从指定目录加载 Skill
  */
-function loadSkill(name: string): Skill | null {
-  const skillPath = path.join(SKILLS_DIR, name);
+function loadSkillFromDir(baseDir: string, name: string): Skill | null {
+  const skillPath = path.join(baseDir, name);
   const skillFile = path.join(skillPath, "SKILL.md");
 
   if (!fs.existsSync(skillFile)) {
@@ -168,9 +187,17 @@ export function executeScript(
   scriptName: string,
   args: string[] = []
 ): { stdout: string; stderr: string } | null {
-  const skillPath = path.join(SKILLS_DIR, skillName, "scripts", scriptName);
+  let skillPath: string | null = null;
 
-  if (!fs.existsSync(skillPath)) {
+  for (const baseDir of SKILLS_BASE_DIRS) {
+    const p = path.join(baseDir, skillName, "scripts", scriptName);
+    if (fs.existsSync(p)) {
+      skillPath = p;
+      break;
+    }
+  }
+
+  if (!skillPath) {
     return null;
   }
 
