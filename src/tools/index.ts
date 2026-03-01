@@ -564,95 +564,76 @@ function simpleHtmlToText(html: string): string {
 }
 
 /**
- * 执行互联网搜索
+ * 执行互联网搜索 (使用 Tavily)
  */
 async function executeWebSearch(query: string, numResults?: number): Promise<ToolResult> {
   const limit = numResults || 5;
+  const apiKey = process.env.TAVILY_API_KEY;
+  
+  if (!apiKey) {
+    return { 
+      tool: "WebSearch", 
+      output: "", 
+      error: "Tavily API key 未配置。请在 .env 中设置 TAVILY_API_KEY" 
+    };
+  }
   
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        max_results: limit,
+        include_answer: true,
+        include_raw_content: false,
+        include_images: false,
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
     
-    const urls = [
-      `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}&c=${limit}`,
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-    ];
-    
-    let bestResult = "";
-    
-    for (const url of urls) {
-      try {
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          },
-          signal: controller.signal,
-        });
-        
-        if (response.ok) {
-          const html = await response.text();
-          const results = parseSearchResults(html, limit);
-          if (results.length > 0) {
-            bestResult = results;
-            break;
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-    
-    clearTimeout(timeoutId);
-    
-    if (!bestResult) {
+    if (!response.ok) {
+      const errorText = await response.text();
       return { 
         tool: "WebSearch", 
-        output: `搜索"${query}"未找到结果。\n\n提示: 搜索引擎可能暂时不可用，请稍后重试或尝试其他查询。` 
+        output: "", 
+        error: `Tavily API 错误: ${response.status} - ${errorText}` 
       };
     }
     
-    return { 
-      tool: "WebSearch", 
-      output: `搜索关键词: ${query}\n\n搜索结果:\n${bestResult}` 
+    const data = await response.json() as {
+      results: Array<{title: string; url: string; content: string; score: number}>;
+      answer?: string;
     };
+    
+    if (!data.results || data.results.length === 0) {
+      return { tool: "WebSearch", output: `未找到"${query}"的相关结果` };
+    }
+    
+    let output = "";
+    
+    if (data.answer) {
+      output += `摘要: ${data.answer}\n\n`;
+    }
+    
+    output += "搜索结果:\n";
+    const results = data.results.slice(0, limit).map((item, i) => {
+      const content = item.content?.substring(0, 200) || "";
+      return `${i + 1}. ${item.title}\n   ${content}${content.length === 200 ? "..." : ""}\n   URL: ${item.url}`;
+    }).join("\n\n");
+    
+    output += results;
+    
+    return { tool: "WebSearch", output };
   } catch (error: any) {
     if (error.name === "AbortError") {
       return { tool: "WebSearch", output: "", error: "搜索超时，请稍后重试" };
     }
     return { tool: "WebSearch", output: "", error: error.message };
   }
-}
-
-function parseSearchResults(html: string, limit: number): string {
-  const results: string[] = [];
-  
-  const linkMatches = html.match(/<a[^>]+href="https?:\/\/[^"]+"[^>]*>/gi) || [];
-  const textMatches = html.match(/<td[^>]*>([^<]+)<\/td>/gi) || [];
-  
-  let count = 0;
-  for (let i = 0; i < Math.min(linkMatches.length, 20) && count < limit; i++) {
-    const linkMatch = linkMatches[i].match(/href="([^"]+)"/);
-    const textMatch = textMatches[i]?.replace(/<[^>]+>/g, "").trim();
-    
-    if (linkMatch && textMatch && textMatch.length > 5) {
-      results.push(`${count + 1}. ${textMatch.substring(0, 100)}\n   ${linkMatch[1]}`);
-      count++;
-    }
-  }
-  
-  if (results.length === 0) {
-    const resultLinkMatches = html.match(/<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi);
-    if (resultLinkMatches) {
-      for (let i = 0; i < Math.min(resultLinkMatches.length, limit); i++) {
-        const match = resultLinkMatches[i].match(/href="([^"]*)"[^>]*>([^<]*)<\/a>/);
-        if (match) {
-          results.push(`${i + 1}. ${match[2]}\n   ${match[1]}`);
-        }
-      }
-    }
-  }
-  
-  return results.join("\n\n");
 }
 
 /**
