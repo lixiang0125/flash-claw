@@ -9,6 +9,7 @@ import { subAgentSystem } from "../subagents";
 import { analyzeComplexity } from "../subagents/analyzer";
 import type { ChatRequest, ChatResponse } from "./types";
 import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
+import { parseTaskWithLLM } from "./llm-parser";
 
 const useQwen = !!process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.includes("dashscope");
 
@@ -257,57 +258,37 @@ class ChatEngine {
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const sessionId = request.sessionId || "default";
     
-    const taskInfo = parseTaskFromMessage(request.message);
-    if (taskInfo) {
-      try {
-        let taskPrompt: string;
+    const taskInfo = await parseTaskWithLLM(request.message, this.llm);
+    
+    if (taskInfo && taskInfo.type) {
+      if (taskInfo.type === "once" && taskInfo.executeAfter) {
+        const task = taskScheduler.createOneTimeTask({
+          name: taskInfo.name,
+          message: taskInfo.message,
+          executeAfter: taskInfo.executeAfter,
+        });
         
-        if (taskInfo.type === "once") {
-          // 一次性任务：立即调度，到期后自动删除
-          const task = taskScheduler.createOneTimeTask({
-            name: taskInfo.name,
-            message: taskInfo.message,
-            executeAfter: taskInfo.executeAfter!,
-          });
-          
-          const minutes = Math.round(taskInfo.executeAfter! / 60000);
-          const timeText = minutes >= 60 ? `${Math.round(minutes / 60)}小时` : `${minutes}分钟`;
-          
-          taskPrompt = `用户请求创建一个一次性任务。
-任务名称: ${task.name}
-任务内容: ${taskInfo.message}
-将在: ${timeText}后执行
-
-请用友好、自然的方式告诉用户任务已创建。用中文回复。`;
-        } else {
-          // 循环任务
-          const task = taskScheduler.createTask({
-            name: taskInfo.name,
-            message: taskInfo.message,
-            schedule: taskInfo.schedule!,
-            enabled: true,
-          });
-          
-          const scheduleText = cronToHumanReadable(taskInfo.schedule!);
-          
-          taskPrompt = `用户请求创建定时任务。
-任务名称: ${task.name}
-任务内容: ${taskInfo.message}
-执行计划: ${scheduleText}
-
-请用友好、自然的方式告诉用户任务已创建。不要提及任务 ID。用中文回复。`;
-        }
-        
-        const llmResponse = await this.llm.invoke([new HumanMessage(taskPrompt)]);
+        const minutes = Math.round(taskInfo.executeAfter / 60000);
+        const timeText = minutes >= 60 ? `${Math.round(minutes / 60)}小时` : `${minutes}分钟`;
         
         return {
-          response: llmResponse.content as string,
+          response: `好的，已设置 ${timeText}后提醒你「${taskInfo.message}」。⏰\n\n到时会准时通知你！`,
           sessionId,
         };
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "Unknown error";
+      }
+      
+      if (taskInfo.type === "recurring" && taskInfo.schedule) {
+        const task = taskScheduler.createTask({
+          name: taskInfo.name,
+          message: taskInfo.message,
+          schedule: taskInfo.schedule,
+          enabled: true,
+        });
+        
+        const scheduleText = cronToHumanReadable(taskInfo.schedule);
+        
         return {
-          response: `创建任务失败: ${message}`,
+          response: `好的，已创建定时任务「${taskInfo.message}」。\n\n执行计划: ${scheduleText}\n\n到时会准时通知你！`,
           sessionId,
         };
       }
