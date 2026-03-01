@@ -4,11 +4,15 @@ import { listSkills, getSkill, type Skill } from "../skills";
 import { TOOLS, executeTool, type ToolResult } from "../tools";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
-import { readUser, readSoul, readMemory, updateMemory, extractInfoToRemember } from "../memory";
+import { readUser, readSoul, readMemory, updateMemory, updateUser, extractInfoToRemember } from "../memory";
 import type { ChatRequest, ChatResponse } from "./types";
 import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
 
 const useQwen = !!process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.includes("dashscope");
+
+const MAX_TOOL_RETRIES = 3;
+const MAX_ITERATIONS = 3;
+const ENABLE_SELF_REVIEW = true;
 
 class ChatEngine {
   private llm: ChatOpenAI;
@@ -117,38 +121,82 @@ class ChatEngine {
       return { response, toolCalls: [] };
     }
 
-    const results: ToolResult[] = [];
+    let results: ToolResult[] = [];
     let finalResponse = response;
-    const toolResults: string[] = [];
 
     for (const tc of toolCalls) {
-      console.log(`Executing tool: ${tc.tool}`, tc.args);
-      const result = await executeTool(tc.tool, tc.args);
-      results.push(result);
+      let lastError: string | undefined;
+      
+      for (let retry = 0; retry < MAX_TOOL_RETRIES; retry++) {
+        console.log(`Executing tool: ${tc.tool} (attempt ${retry + 1}/${MAX_TOOL_RETRIES})`, tc.args);
+        const result = await executeTool(tc.tool, tc.args);
+        results.push(result);
 
+        if (result.error) {
+          lastError = result.error;
+          console.log(`Tool ${tc.tool} failed: ${result.error}, retrying...`);
+          
+          const retryPrompt = this.buildRetryPrompt(tc.tool, tc.args, result.error, retry + 1);
+          const retryResponse = await this.llm.invoke([new HumanMessage(retryPrompt)]);
+          
+          const newToolCalls = parseToolCalls(retryResponse.content as string);
+          if (newToolCalls.length > 0) {
+            const newTc = newToolCalls[0]!;
+            tc.tool = newTc.tool;
+            tc.args = newTc.args;
+            results.pop();
+          }
+        } else {
+          lastError = undefined;
+          break;
+        }
+      }
+
+      if (lastError) {
+        console.log(`Tool ${tc.tool} failed after ${MAX_TOOL_RETRIES} retries`);
+      }
+
+      const result = results[results.length - 1];
+      if (!result) {
+        continue;
+      }
+      
       if (result.error) {
-        toolResults.push(`工具执行失败: ${tc.tool} - ${result.error}`);
+        finalResponse = finalResponse.replace(
+          /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/,
+          ""
+        );
       } else {
         const output = result.output.length > 10000 
           ? result.output.substring(0, 10000) + "\n\n[内容过长，已截断...]" 
           : result.output;
-        toolResults.push(`${tc.tool}: ${JSON.stringify(tc.args)} => ${output}`);
+        finalResponse = finalResponse.replace(
+          /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/,
+          `[TOOL_RESULT]${tc.tool}: ${JSON.stringify(tc.args)} => ${output}[/TOOL_RESULT]`
+        );
       }
-
-      finalResponse = finalResponse.replace(
-        /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/,
-        ""
-      );
     }
 
-    const cleanedResponse = finalResponse.replace(/\[TOOL_RESULT\][\s\S]*?\[\/TOOL_RESULT\]/g, "").trim();
+    return { response: finalResponse, toolCalls: results };
+  }
 
-    const summaryPrompt = this.buildToolSummaryPrompt(cleanedResponse, toolResults);
-    const summaryResponse = await this.llm.invoke([
-      new HumanMessage(summaryPrompt)
-    ]);
+  private buildRetryPrompt(tool: string, args: Record<string, unknown>, error: string, attempt: number): string {
+    return `工具执行失败，需要你修复参数或换一种方式执行。
 
-    return { response: summaryResponse.content as string, toolCalls: results };
+失败的工具: ${tool}
+参数: ${JSON.stringify(args, null, 2)}
+错误信息: ${error}
+尝试次数: ${attempt}/${MAX_TOOL_RETRIES}
+
+请重新分析任务，选择正确的工具和参数。如果原来的工具不适合，请选择其他合适的工具。
+请直接输出新的工具调用格式，不要添加任何解释。
+
+如果是文件相关错误，可能需要：
+1. 先用 Glob 或 Grep 查找正确的文件路径
+2. 用 Read 查看文件内容确认格式
+3. 确保 oldString 完全匹配文件中的内容（注意空格和缩进）
+
+请给出修复后的工具调用:`;
   }
 
   private buildToolSummaryPrompt(originalResponse: string, toolResults: string[]): string {
@@ -250,23 +298,101 @@ class ChatEngine {
     const systemMessage = new SystemMessage(this.buildSystemMessage(sessionId));
     const messages = [systemMessage, ...history, new HumanMessage(request.message)];
 
-    const response = await this.llm.invoke(messages);
-    const responseText = response.content as string;
+    let response = await this.llm.invoke(messages);
+    let responseText = response.content as string;
 
-    const { response: finalResponse } = await this.processToolCalls(responseText, sessionId);
+    let { response: processedResponse, toolCalls } = await this.processToolCalls(responseText, sessionId);
+
+    if (ENABLE_SELF_REVIEW && toolCalls.length > 0) {
+      processedResponse = await this.selfReviewLoop(request.message, processedResponse, toolCalls, sessionId);
+    }
 
     history.push(new HumanMessage(request.message));
-    history.push(new AIMessage(finalResponse));
+    history.push(new AIMessage(processedResponse));
 
-    // 检查是否需要更新记忆
-    this.maybeUpdateMemory(request.message, finalResponse);
+    this.maybeUpdateMemory(request.message, processedResponse);
 
     return {
-      response: finalResponse,
+      response: processedResponse,
       sessionId,
       skills: this.getSessionSkills(sessionId),
       autoMatched,
     };
+  }
+
+  private async selfReviewLoop(
+    userMessage: string,
+    currentResponse: string,
+    toolCalls: ToolResult[],
+    sessionId: string
+  ): Promise<string> {
+    let bestResponse = currentResponse;
+    let hasFailures = toolCalls.some(tc => tc.error);
+
+    if (!hasFailures) {
+      return bestResponse;
+    }
+
+    console.log(`[Self-Iteration] Starting self-review loop (max ${MAX_ITERATIONS} iterations)`);
+
+    for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+      console.log(`[Self-Iteration] Iteration ${iteration + 1}/${MAX_ITERATIONS}`);
+
+      const failedTools = toolCalls.filter(tc => tc.error);
+      const reviewPrompt = this.buildSelfReviewPrompt(userMessage, bestResponse, failedTools);
+
+      const reviewResponse = await this.llm.invoke([new HumanMessage(reviewPrompt)]);
+      const reviewText = reviewResponse.content as string;
+
+      const { response: newResponse, toolCalls: newToolCalls } = await this.processToolCalls(reviewText, sessionId);
+
+      const newHasFailures = newToolCalls.some(tc => tc.error);
+      
+      if (!newHasFailures) {
+        console.log(`[Self-Iteration] All tools succeeded, accepting new response`);
+        bestResponse = newResponse;
+        break;
+      }
+
+      const allFailedBefore = failedTools.length;
+      const allFailedNow = newToolCalls.filter(tc => tc.error).length;
+      
+      if (allFailedNow >= allFailedBefore) {
+        console.log(`[Self-Iteration] No improvement, stopping`);
+        break;
+      }
+
+      bestResponse = newResponse;
+      toolCalls = newToolCalls;
+    }
+
+    return bestResponse;
+  }
+
+  private buildSelfReviewPrompt(userMessage: string, currentResponse: string, failedTools: ToolResult[]): string {
+    let prompt = `你需要审查并改进你对用户请求的回复。
+
+用户原始请求: "${userMessage}"
+
+当前回复:
+${currentResponse}
+
+工具执行失败:
+`;
+    for (const tc of failedTools) {
+      prompt += `- ${tc.tool}: ${tc.error}\n`;
+    }
+
+    prompt += `
+请分析失败原因，并尝试修复。你可以选择：
+1. 修正工具参数后重试
+2. 使用其他工具替代
+3. 调整执行顺序（如先读取文件确认内容再编辑）
+4. 改变方法来完成用户的任务
+
+请直接输出修复后的回复，包含必要的工具调用。不要添加任何解释。`;
+
+    return prompt;
   }
 
   /**

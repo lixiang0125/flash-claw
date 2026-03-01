@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **自迭代机制**: 类似 OpenClaw 的自我改进能力
+  - 工具重试: 失败时自动重试（最多3次），分析错误并修正参数
+  - 质量阈值循环: 工具执行失败后 AI 自我审查
+  - 多轮反馈: 迭代改进直到成功或达到最大迭代次数
+
+### Changed
+
 - **对话引擎**: 基于 LangChain + Qwen 的 AI 对话系统
 - **多会话支持**: 通过 sessionId 隔离不同用户的对话
 - **Skill 执行系统**: 支持 Claude Code 标准的 Skill

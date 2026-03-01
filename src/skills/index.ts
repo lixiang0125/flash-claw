@@ -16,6 +16,8 @@ export interface Skill {
   description: string;
   version?: string;
   allowed_tools?: string[];
+  disable_user_invocation?: boolean;
+  disable_model_invocation?: boolean;
   instructions: string;
   references: string[];
   scripts: Record<string, string>;
@@ -159,6 +161,8 @@ function loadSkillFromDir(baseDir: string, name: string): Skill | null {
     description: meta.description,
     version: meta.version,
     allowed_tools: meta.allowed_tools,
+    disable_user_invocation: meta.disable_user_invocation,
+    disable_model_invocation: meta.disable_model_invocation,
     instructions: instructions.trim(),
     references,
     scripts,
