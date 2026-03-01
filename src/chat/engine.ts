@@ -7,6 +7,7 @@ import { userProfileStore } from "../profiles";
 import { readUser, readSoul, readMemory, updateMemory, updateUser, extractInfoToRemember } from "../memory";
 import { subAgentSystem } from "../subagents";
 import { analyzeComplexity } from "../subagents/analyzer";
+import { analyzeFeedback, evolve } from "../evolution";
 import type { ChatRequest, ChatResponse } from "./types";
 import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
 import { parseTaskWithLLM } from "./llm-parser";
@@ -357,8 +358,25 @@ class ChatEngine {
 
     this.maybeUpdateMemory(request.message, processedResponse);
 
+    const finalResponse = processedResponse;
+
+    if (sessionId !== "system:feedback-analyzer" && sessionId !== "system:evolution-planner") {
+      setTimeout(async () => {
+        try {
+          const feedback = await analyzeFeedback(request.message);
+          if (feedback.type !== "normal_chat" && feedback.priority === "high") {
+            console.log(`[Evolution] Detected evolution feedback: ${feedback.type} - ${feedback.demand}`);
+            const result = await evolve(feedback);
+            console.log(`[Evolution] Result: ${result.message}`);
+          }
+        } catch (error) {
+          console.error("[Evolution] Error:", error);
+        }
+      }, 100);
+    }
+
     return {
-      response: processedResponse,
+      response: finalResponse,
       sessionId,
       skills: this.getSessionSkills(sessionId),
       autoMatched,

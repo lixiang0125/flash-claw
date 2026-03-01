@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### 对话驱动进化系统 (2026-03-01)
+
+**目的**: 类似 OpenClaw，让用户通过自然语言对话驱动 Agent 持续进化
+
+**改造点**:
+- 创建 `src/evolution/feedback_analyzer.ts`: 反馈分析器
+  - 分析用户输入是否为进化类反馈
+  - 分类：skill_optimize, skill_add, prompt_optimize, config_adjust, tool_fix
+  - 提取进化需求和优先级
+- 创建 `src/evolution/evolution_planner.ts`: 进化规划器
+  - 将进化需求转化为可执行的方案
+  - 生成 Skill 更新、配置修改等脚本
+- 创建 `src/evolution/evolution_executor.ts`: 进化执行器
+  - 执行进化方案
+  - 自动备份和回滚
+  - 验证进化效果
+- 集成到 ChatEngine: 每次对话后自动检测进化需求
+- 高优先级反馈自动触发进化
+
 ### Jina AI Reader WebFetch (2026-03-01)
 
 **目的**: 替换不稳定的 WebFetch 实现，使用免费的 Jina AI Reader API
