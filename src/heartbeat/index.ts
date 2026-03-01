@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 import path from "path";
 import fs from "fs";
 import { chatEngine } from "../chat";
+import { taskScheduler } from "../tasks";
+import { feishuBot } from "../integrations/feishu";
 
 export interface HeartbeatCheck {
   name: string;
@@ -16,6 +18,13 @@ export interface HeartbeatResult {
   check: string;
   action: string;
   message?: string;
+  severity?: "info" | "warning" | "error";
+}
+
+interface HealthCheckResult {
+  name: string;
+  status: "ok" | "warning" | "error";
+  message: string;
 }
 
 class HeartbeatSystem {
@@ -231,6 +240,160 @@ class HeartbeatSystem {
     }, intervalMinutes * 60 * 1000);
 
     console.log(`[Heartbeat] Running every ${intervalMinutes} minutes`);
+  }
+
+  /**
+   * 内置健康检查
+   */
+  async runHealthChecks(): Promise<HealthCheckResult[]> {
+    const results: HealthCheckResult[] = [];
+
+    // 检查 Feishu 连接状态
+    try {
+      const feishuStatus = feishuBot?.getStatus?.();
+      if (!feishuStatus?.connected) {
+        results.push({
+          name: "Feishu连接",
+          status: "error",
+          message: "飞书 WebSocket 未连接",
+        });
+      } else {
+        results.push({
+          name: "Feishu连接",
+          status: "ok",
+          message: "飞书连接正常",
+        });
+      }
+    } catch (error: any) {
+      results.push({
+        name: "Feishu连接",
+        status: "error",
+        message: `飞书检查失败: ${error.message}`,
+      });
+    }
+
+    // 检查最近任务执行情况
+    try {
+      const tasks = taskScheduler.listTasks();
+      const now = new Date();
+      const missedTasks = tasks.filter((t) => {
+        if (!t.enabled || !t.nextRun) return false;
+        return new Date(t.nextRun) < now;
+      });
+      if (missedTasks.length > 0) {
+        results.push({
+          name: "任务执行",
+          status: "warning",
+          message: `${missedTasks.length} 个任务错 过执行时间`,
+        });
+      } else {
+        results.push({
+          name: "任务执行",
+          status: "ok",
+          message: "所有任务执行正常",
+        });
+      }
+    } catch (error: any) {
+      results.push({
+        name: "任务执行",
+        status: "warning",
+        message: `任务检查失败: ${error.message}`,
+      });
+    }
+
+    // 检查服务器运行时间
+    const uptime = process.uptime();
+    if (uptime < 60) {
+      results.push({
+        name: "服务器运行",
+        status: "info",
+        message: `服务器刚启动 (${Math.floor(uptime)}秒)`,
+      });
+    } else {
+      results.push({
+        name: "服务器运行",
+        status: "ok",
+        message: `服务器运行正常 (${Math.floor(uptime / 60)}分钟)`,
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * 发送通知到 Feishu
+   */
+  async notify(results: HeartbeatResult[]): Promise<void> {
+    if (results.length === 0) return;
+
+    const lastChatId = taskScheduler.getLastChatId();
+    if (!lastChatId) {
+      console.log("[Heartbeat] No chat ID available for notification");
+      return;
+    }
+
+    const errorResults = results.filter((r) => r.severity === "error" || r.severity === "warning");
+    if (errorResults.length === 0) return;
+
+    const message = this.formatNotification(errorResults);
+
+    try {
+      await feishuBot?.sendMessage?.(lastChatId, undefined, message);
+      console.log("[Heartbeat] Notification sent to Feishu");
+    } catch (error: any) {
+      console.error("[Heartbeat] Failed to send notification:", error.message);
+    }
+  }
+
+  /**
+   * 格式化通知消息
+   */
+  private formatNotification(results: HeartbeatResult[]): string {
+    const lines = ["⚠️ 心跳检查发现问题:\n"];
+    for (const result of results) {
+      const emoji = result.severity === "error" ? "❌" : "⚠️";
+      lines.push(`${emoji} ${result.check}: ${result.message}`);
+    }
+    lines.push("\n请检查系统状态！");
+    return lines.join("\n");
+  }
+
+  /**
+   * 执行所有需要的心跳检查
+   */
+  async tick(): Promise<HeartbeatResult[]> {
+    const results: HeartbeatResult[] = [];
+
+    // 先运行内置健康检查
+    const healthResults = await this.runHealthChecks();
+    for (const hr of healthResults) {
+      if (hr.status !== "ok") {
+        results.push({
+          check: hr.name,
+          action: "notify",
+          message: hr.message,
+          severity: hr.status === "error" ? "error" : "warning",
+        });
+      }
+    }
+
+    // 再运行 HEARTBEAT.md 中的自定义检查
+    const checks = this.parseHeartbeatFile();
+    for (const check of checks) {
+      if (this.shouldRun(check)) {
+        const result = await this.runCheck(check);
+        if (result) {
+          results.push(result);
+        }
+      }
+    }
+
+    // 如果有问题，发送到 Feishu 通知
+    if (results.length > 0) {
+      await this.notify(results);
+    }
+
+    return results;
   }
 
   /**

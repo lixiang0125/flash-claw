@@ -368,6 +368,16 @@ export class FeishuBot {
 
     return { success: true };
   }
+
+  /**
+   * 获取飞书连接状态
+   */
+  getStatus(): { connected: boolean; appId?: string } {
+    return {
+      connected: !!this.wsClient,
+      appId: this.config.appId,
+    };
+  }
 }
 
 export const feishuBot = new FeishuBot();
