@@ -130,6 +130,7 @@ export class FeishuBot {
     const senderId = message.sender?.sender_id;
     const chatId = message.chat_id;
     const sessionId = this.getSessionId(chatId, senderId);
+    const messageId = message.message_id;
 
     // 记录聊天 ID，用于任务提醒
     taskScheduler.setLastChatId(chatId);
@@ -138,8 +139,8 @@ export class FeishuBot {
       `Feishu: Processing message from ${senderId?.user_id || senderId?.open_id}: ${text}`
     );
 
-    // 立即发送收到消息的确认
-    await this.sendMessage(chatId, senderId, "收到！正在处理中... 👀");
+    // 添加 emoji reaction 表示已收到消息（无需 LLM）
+    await this.addReaction(messageId, "THINKING");
 
     // 后台处理实际请求
     setTimeout(async () => {
@@ -152,9 +153,26 @@ export class FeishuBot {
         await this.sendMessage(chatId, senderId, result.response);
       } catch (error) {
         console.error("Feishu: Chat error:", error);
-        await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
+        const errorResponse = await this.generateErrorResponse(text, error);
+        await this.sendMessage(chatId, senderId, errorResponse);
       }
     }, 100);
+  }
+
+  private async generateErrorResponse(userMessage: string, error: any): Promise<string> {
+    try {
+      const result = await chatEngine.chat({
+        message: `用户说: "${userMessage}"
+
+处理用户请求时发生错误: ${error.message || error}
+
+请生成一个友好的回复，告知用户遇到了问题，但不要提到技术细节。可以建议用户稍后重试或换一种方式提问。`,
+        sessionId: "feishu_error_response",
+      });
+      return result.response;
+    } catch {
+      return "抱歉，我遇到了一些问题。请稍后重试，或者换一种方式提问。";
+    }
   }
 
   private getSessionId(chatId: string, userId?: Lark.ImMessageSenderId): string {
@@ -209,6 +227,34 @@ export class FeishuBot {
       await this.sendViaWebhook(text);
     } else if (this.config.appId && this.config.appSecret) {
       await this.sendViaAPI(chatId, text);
+    }
+  }
+
+  private async addReaction(messageId: string, emojiType: string): Promise<void> {
+    if (!this.config.appId || !this.config.appSecret) return;
+
+    try {
+      const token = await this.getTenantAccessToken();
+
+      const client = new Lark.Client({
+        appId: this.config.appId,
+        appSecret: this.config.appSecret,
+        appType: Lark.AppType.SelfBuild,
+        domain: Lark.Domain.Feishu,
+      });
+
+      await client.im.messageReaction.create({
+        headers: { Authorization: `Bearer ${token}` },
+        path: { message_id: messageId },
+        requestBody: {
+          reaction_type: {
+            emoji_type: emojiType,
+          },
+        },
+      });
+      console.log(`Feishu: Added ${emojiType} reaction to message ${messageId}`);
+    } catch (error) {
+      console.error(`Feishu: Failed to add reaction:`, error);
     }
   }
 
