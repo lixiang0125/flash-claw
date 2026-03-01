@@ -152,11 +152,30 @@
 - 安装 `@larksuiteoapi/node-sdk` 依赖
 - 使用 `WSClient` 建立 WebSocket 长连接
 - 简化代码，移除 Webhook 依赖
-- 更新 README 接入指南
-- 添加 API 端点:
+- 更新
+- 添加 API README 接入指南 端点:
   - `POST /api/webhooks/feishu`: 飞书 Webhook 接收地址
   - `GET /api/webhooks/feishu/status`: 配置检查
 - 环境变量配置:
   - `FEISHU_WEBHOOK_URL`: Webhook 地址
   - `FEISHU_APP_ID`: 应用 ID
   - `FEISHU_APP_SECRET`: 应用密钥
+
+## 2024-03-01 - 飞书长连接问题修复
+
+**目的**: 修复飞书机器人消息收发问题
+
+**改造点**:
+- 修复 SDK 事件注册方式，使用正确的 EventDispatcher.register() 格式
+- 修复获取 tenant_access_token 方式，改用原生 fetch
+- 修复发送消息 API 调用格式
+- 成功实现长连接模式机器人对话
+
+## 2024-03-01 - 添加 WebFetch 工具
+
+**目的**: 让 AI 能够获取网页内容
+
+**改造点**:
+- 添加 WebFetch 工具到工具列表
+- 支持 fetch URL 并返回内容
+- 限制返回内容长度避免 token 溢出

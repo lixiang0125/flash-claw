@@ -5,17 +5,8 @@ export interface FeishuConfig {
   appId?: string;
   appSecret?: string;
   verificationToken?: string;
-}
-
-export interface FeishuMessage {
-  msg_type: string;
-  content?: any;
-}
-
-export interface FeishuUserId {
-  union_id?: string;
-  open_id?: string;
-  user_id?: string;
+  webhookUrl?: string;
+  useLongConnection?: boolean;
 }
 
 export class FeishuBot {
@@ -29,19 +20,31 @@ export class FeishuBot {
       appId: process.env.FEISHU_APP_ID,
       appSecret: process.env.FEISHU_APP_SECRET,
       verificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
+      webhookUrl: process.env.FEISHU_WEBHOOK_URL,
+      useLongConnection: process.env.FEISHU_USE_LONG_CONNECTION !== "false",
     };
 
     if (this.isConfigured()) {
-      this.initWSClient();
+      if (this.config.useLongConnection && this.config.appId && this.config.appSecret) {
+        this.initWSClient();
+      } else if (this.config.webhookUrl) {
+        console.log("Feishu: using Webhook mode");
+      }
     }
   }
 
   isConfigured(): boolean {
-    return !!(this.config.appId && this.config.appSecret);
+    return !!(
+      this.config.webhookUrl ||
+      (this.config.appId && this.config.appSecret)
+    );
   }
 
   getConfig(): FeishuConfig {
-    return this.config;
+    return {
+      ...this.config,
+      appSecret: this.config.appSecret ? "***" : undefined,
+    };
   }
 
   verifyToken(token: string): boolean {
@@ -50,43 +53,63 @@ export class FeishuBot {
   }
 
   private initWSClient(): void {
-    if (!this.config private initWSClient.appId || !this.config.appSecret) return;
+    if (!this.config.appId || !this.config.appSecret) return;
 
     const sdkConfig: Lark.SDKConfig = {
       appId: this.config.appId,
       appSecret: this.config.appSecret,
       domain: Lark.Domain.Feishu,
       appType: Lark.AppType.SelfBuild,
-      loggerLevel: Lark.LoggerLevel.debug,
     };
 
     this.wsClient = new Lark.WSClient({
       ...sdkConfig,
-      loggerLevel: Lark.LoggerLevel.info,
+      loggerLevel: Lark.LoggerLevel.debug,
     });
 
     console.log("Initializing Feishu WebSocket client...");
+    console.log("App ID:", this.config.appId);
 
+    // 使用正确的事件分发器格式
+    const eventDispatcher = new Lark.EventDispatcher({});
+    
+    // 直接在 start 方法中注册
     this.wsClient.start({
-      eventDispatcher: new Lark.EventDispatcher({
-        "im.message.receive_v1": this.handleMessage.bind(this),
+      eventDispatcher: eventDispatcher.register({
+        "im.message.receive_v1": async (data: any) => {
+          console.log("Feishu: Received message event!");
+          console.log("Data:", JSON.stringify(data, null, 2));
+          await this.handleMessage(data);
+        },
       }),
       wsConfig: {
         autoReconnect: true,
       },
+    }).then(() => {
+      console.log("Feishu WebSocket client started successfully");
+    }).catch((err: any) => {
+      console.error("Feishu WebSocket error:", err);
     });
-
-    console.log("Feishu WebSocket client started");
   }
 
   private async handleMessage(
-    event: Lark.im.message.receive_v1.Event
+    event: any
   ): Promise<void> {
+    console.log("Feishu: Received event:", JSON.stringify(event));
+    
     const message = event.message;
-    if (!message || !message.message_id) return;
+    if (!message || !message.message_id) {
+      console.log("Feishu: No message or message_id in event");
+      return;
+    }
 
     const messageType = message.message_type;
-    if (messageType !== "text" && messageType !== "post") return;
+    console.log("Feishu: Message type:", messageType);
+    
+    if (messageType !== "text" && messageType !== "post") {
+      console.log("Feishu: Ignoring non-text message type");
+      return;
+    }
 
     let text = "";
     try {
@@ -96,14 +119,19 @@ export class FeishuBot {
       text = message.content || "";
     }
 
-    if (!text) return;
+    console.log("Feishu: Message text:", text);
+    
+    if (!text) {
+      console.log("Feishu: Empty text, ignoring");
+      return;
+    }
 
     const senderId = message.sender?.sender_id;
     const chatId = message.chat_id;
     const sessionId = this.getSessionId(chatId, senderId);
 
     console.log(
-      `Received message from ${senderId?.user_id || senderId?.open_id}: ${text}`
+      `Feishu: Processing message from ${senderId?.user_id || senderId?.open_id}: ${text}`
     );
 
     try {
@@ -114,7 +142,7 @@ export class FeishuBot {
 
       await this.sendMessage(chatId, senderId, result.response);
     } catch (error) {
-      console.error("Chat error:", error);
+      console.error("Feishu: Chat error:", error);
       await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
     }
   }
@@ -137,23 +165,26 @@ export class FeishuBot {
       throw new Error("Feishu app credentials not configured");
     }
 
-    const client = new Lark.Client({
-      appId: this.config.appId,
-      appSecret: this.config.appSecret,
-      domain: Lark.Domain.Feishu,
-    });
+    const response = await fetch(
+      "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          app_id: this.config.appId,
+          app_secret: this.config.appSecret,
+        }),
+      }
+    );
 
-    const resp = await client.auth.v3.tenantAccessToken.internal({
-      app_id: this.config.appId,
-      app_secret: this.config.appSecret,
-    });
-
-    if (resp.code !== 0) {
-      throw new Error(`Failed to get token: ${resp.msg}`);
+    const data = await response.json();
+    
+    if (data.code !== 0) {
+      throw new Error(`Failed to get token: ${data.msg}`);
     }
 
-    this.tenantAccessToken = resp.data.tenant_access_token;
-    this.tokenExpireTime = Date.now() + (resp.data.expire - 300) * 1000;
+    this.tenantAccessToken = data.tenant_access_token;
+    this.tokenExpireTime = Date.now() + (data.expire - 300) * 1000;
     return this.tenantAccessToken;
   }
 
@@ -162,33 +193,64 @@ export class FeishuBot {
     userId?: Lark.ImMessageSenderId,
     text?: string
   ): Promise<void> {
-    if (!text || !this.config.appId || !this.config.appSecret) return;
+    if (!text) return;
 
-    const client = new Lark.Client({
-      appId: this.config.appId,
-      appSecret: this.config.appSecret,
-      domain: Lark.Domain.Feishu,
+    if (this.config.webhookUrl) {
+      await this.sendViaWebhook(text);
+    } else if (this.config.appId && this.config.appSecret) {
+      await this.sendViaAPI(chatId, text);
+    }
+  }
+
+  private async sendViaWebhook(text: string): Promise<void> {
+    if (!this.config.webhookUrl) return;
+
+    await fetch(this.config.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        msg_type: "text",
+        content: { text },
+      }),
     });
+  }
+
+  private async sendViaAPI(chatId: string, text: string): Promise<void> {
+    if (!this.config.appId || !this.config.appSecret) return;
 
     try {
       const token = await this.getTenantAccessToken();
-      const receiveId = chatId;
 
-      await client.im.v1.messages.create({
-        data: {
+      const client = new Lark.Client({
+        appId: this.config.appId,
+        appSecret: this.config.appSecret,
+        appType: Lark.AppType.SelfBuild,
+        domain: Lark.Domain.Feishu,
+      });
+
+      const result = await client.im.message.create({
+        params: {
           receive_id_type: "chat_id",
-          msg_type: "text",
+        },
+        data: {
+          receive_id: chatId,
           content: JSON.stringify({ text }),
-          receive_id: receiveId,
+          msg_type: "text",
         },
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
-      console.log(`Sent message to ${receiveId}`);
+      console.log("Feishu: Send result:", JSON.stringify(result));
+      
+      if (result.code !== 0) {
+        console.error("Feishu: Send message failed:", result.msg);
+      } else {
+        console.log(`Feishu: Sent message to ${chatId}`);
+      }
     } catch (error) {
-      console.error("Failed to send message:", error);
+      console.error("Feishu: Failed to send message:", error);
     }
   }
 
@@ -199,6 +261,47 @@ export class FeishuBot {
       return {
         challenge: event.header?.event_id || body.challenge,
       };
+    }
+
+    if (event.header?.event_type === "url_verification") {
+      return {
+        challenge: body.challenge,
+      };
+    }
+
+    if (event.type === "message" || event.event?.message) {
+      const message = event.event?.message || event.message;
+      if (!message) return { success: true };
+
+      let text = "";
+      try {
+        const content = JSON.parse(message.content || "{}");
+        text = content.text || "";
+      } catch {
+        text = message.content || "";
+      }
+
+      if (!text) return { success: true };
+
+      const chatId = message.chat_id;
+      const senderId = message.sender?.sender_id;
+      const sessionId = this.getSessionId(chatId, senderId);
+
+      console.log(
+        `Feishu (Webhook): Received message from ${senderId?.user_id || senderId?.open_id}: ${text}`
+      );
+
+      try {
+        const result = await chatEngine.chat({
+          message: text,
+          sessionId,
+        });
+
+        await this.sendMessage(chatId, senderId, result.response);
+      } catch (error) {
+        console.error("Feishu: Chat error:", error);
+        await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
+      }
     }
 
     return { success: true };

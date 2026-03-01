@@ -149,7 +149,29 @@ const GrepTool: Tool = {
   },
 };
 
-export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool];
+/**
+ * 网页抓取工具
+ */
+const WebFetchTool: Tool = {
+  name: "WebFetch",
+  description: "获取网页内容。用于获取URL的HTML或Markdown内容。",
+  parameters: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string",
+        description: "要获取的网页URL",
+      },
+      format: {
+        type: "string",
+        description: "返回格式: markdown (默认) 或 text 或 html",
+      },
+    },
+    required: ["url"],
+  },
+};
+
+export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool];
 
 /**
  * 执行工具
@@ -172,6 +194,8 @@ export async function executeTool(
         return executeGlob(args.pattern);
       case "Grep":
         return executeGrep(args.pattern, args.path);
+      case "WebFetch":
+        return executeWebFetch(args.url, args.format);
       default:
         return { tool: toolName, output: "", error: `Unknown tool: ${toolName}` };
     }
@@ -293,6 +317,40 @@ function executeGrep(pattern: string, searchPath?: string): ToolResult {
     return { tool: "Grep", output: output || "No matches found" };
   } catch (error: any) {
     return { tool: "Grep", output: "", error: "No matches found" };
+  }
+}
+
+/**
+ * 执行网页抓取
+ */
+async function executeWebFetch(url: string, format?: string): Promise<ToolResult> {
+  const responseType = format || "text";
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      },
+    });
+    
+    if (!response.ok) {
+      return { tool: "WebFetch", output: "", error: `HTTP ${response.status}: ${response.statusText}` };
+    }
+    
+    let content: string;
+    if (responseType === "markdown" || responseType === "html") {
+      content = await response.text();
+    } else {
+      content = await response.text();
+    }
+    
+    const truncated = content.length > 50000 
+      ? content.substring(0, 50000) + "\n\n[Content truncated...]" 
+      : content;
+    
+    return { tool: "WebFetch", output: `URL: ${url}\n\n${truncated}` };
+  } catch (error: any) {
+    return { tool: "WebFetch", output: "", error: error.message };
   }
 }
 
