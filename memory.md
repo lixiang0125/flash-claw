@@ -190,5 +190,17 @@
 - 工具结果截断从 200 字符提升到 10000 字符
 - 安装 @larksuiteoapi/node-sdk, @mozilla/readability, jsdom 依赖
 
+## 2024-03-01 - 任务系统
+
+**目的**: 添加定时任务调度功能
+
+**改造点**:
+- 使用 bun:sqlite 
+- 使用 cron-parser 解析 cron持久化任务数据 表达式
+- 实现任务 CRUD API
+- 支持手动触发和自动调度
+- 每分钟检查并执行到期的任务
+- 安装 cron-parser 依赖
+
 - 支持 fetch URL 并返回内容
 - 限制返回内容长度避免 token 溢出

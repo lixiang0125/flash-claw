@@ -4,6 +4,7 @@ import { serveStatic } from "hono/bun";
 import { chatEngine, type ChatRequest } from "./chat";
 import { listSkills, searchSkills, getSkill, executeScript } from "./skills";
 import { feishuBot } from "./integrations/feishu";
+import { taskScheduler } from "./tasks";
 
 const app = new Hono();
 
@@ -98,6 +99,98 @@ app.get("/api/webhooks/feishu/status", (c) => {
     configured: feishuBot.isConfigured(),
     config: feishuBot.getConfig(),
   });
+});
+
+/**
+ * 任务系统 API
+ */
+app.get("/api/tasks", (c) => {
+  const tasks = taskScheduler.listTasks();
+  return c.json({ tasks });
+});
+
+app.post("/api/tasks", async (c) => {
+  const body = await c.req.json<{
+    name: string;
+    message: string;
+    schedule: string;
+    enabled?: boolean;
+  }>();
+
+  if (!body.name || !body.message || !body.schedule) {
+    return c.json({ error: "name, message, and schedule are required" }, 400);
+  }
+
+  try {
+    const task = taskScheduler.createTask({
+      name: body.name,
+      message: body.message,
+      schedule: body.schedule,
+      enabled: body.enabled ?? true,
+    });
+    return c.json({ task });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+app.get("/api/tasks/:id", (c) => {
+  const id = c.req.param("id");
+  const task = taskScheduler.getTask(id);
+
+  if (!task) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+
+  return c.json({ task });
+});
+
+app.patch("/api/tasks/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    name?: string;
+    message?: string;
+    schedule?: string;
+    enabled?: boolean;
+  }>();
+
+  try {
+    const task = taskScheduler.updateTask(id, body);
+    if (!task) {
+      return c.json({ error: "Task not found" }, 404);
+    }
+    return c.json({ task });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+app.delete("/api/tasks/:id", (c) => {
+  const id = c.req.param("id");
+  const deleted = taskScheduler.deleteTask(id);
+
+  if (!deleted) {
+    return c.json({ error: "Task not found" }, 404);
+  }
+
+  return c.json({ success: true });
+});
+
+app.post("/api/tasks/:id/run", async (c) => {
+  const id = c.req.param("id");
+
+  try {
+    const result = await taskScheduler.runTask(id);
+    return c.json({ run: result });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 400);
+  }
+});
+
+app.get("/api/tasks/:id/runs", (c) => {
+  const id = c.req.param("id");
+  const runs = taskScheduler.getTaskRuns(id);
+  return c.json({ runs });
 });
 
 export default {

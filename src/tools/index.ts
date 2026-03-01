@@ -327,6 +327,7 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
   const extractMode = format || "markdown";
   
   try {
+    // 先尝试简单 fetch
     const response = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -367,12 +368,24 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
           title = article.title;
           text = extractMode === "text" ? article.textContent : article.content;
         } else {
-          // Readability 失败，使用简单提取
           text = simpleHtmlToText(html);
         }
       } catch (e) {
-        // 回退到简单提取
         text = simpleHtmlToText(html);
+      }
+    }
+    
+    // 如果内容太短，尝试使用 Playwright 渲染
+    if (text.length < 500) {
+      console.log(`WebFetch: Content too short (${text.length} chars), trying Playwright...`);
+      try {
+        const playwrightResult = await fetchWithPlaywright(url, extractMode);
+        if (playwrightResult.text.length > text.length) {
+          text = playwrightResult.text;
+          title = title || playwrightResult.title;
+        }
+      } catch (e) {
+        console.error("WebFetch: Playwright failed:", e);
       }
     }
     
@@ -389,6 +402,66 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
     return { tool: "WebFetch", output: `URL: ${url}\n\n${result}` };
   } catch (error: any) {
     return { tool: "WebFetch", output: "", error: error.message };
+  }
+}
+
+/**
+ * 使用 Playwright 渲染页面并提取内容
+ */
+async function fetchWithPlaywright(url: string, extractMode: string): Promise<{ text: string; title?: string }> {
+  const { chromium } = require("playwright");
+  
+  const browser = await chromium.launch({ 
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
+  
+  try {
+    const page = await browser.newPage();
+    
+    // 设置视口
+    await page.setViewportSize({ width: 1280, height: 720 });
+    
+    // 访问页面
+    await page.goto(url, { 
+      waitUntil: "networkidle",
+      timeout: 30000 
+    });
+    
+    // 等待内容加载
+    await page.waitForTimeout(2000);
+    
+    // 获取标题
+    const title = await page.title();
+    
+    // 尝试获取主要内容
+    let content = "";
+    
+    // 方法1: 尝试获取 article 或 main 标签
+    const articleContent = await page.$eval("article, main, .article, #article", el => el.innerText).catch(() => null);
+    
+    if (articleContent) {
+      content = articleContent;
+    } else {
+      // 方法2: 获取 body 文本并清理
+      content = await page.evaluate(() => {
+        const body = document.body;
+        // 移除脚本和样式
+        const scripts = body.querySelectorAll("script, style, nav, footer, header, aside");
+        scripts.forEach(el => el.remove());
+        return body.innerText || "";
+      });
+    }
+    
+    await browser.close();
+    
+    return {
+      text: extractMode === "text" ? content : content,
+      title
+    };
+  } catch (error) {
+    await browser.close();
+    throw error;
   }
 }
 
