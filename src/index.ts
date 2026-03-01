@@ -6,6 +6,7 @@ import { listSkills, searchSkills, getSkill, executeScript } from "./skills";
 import { feishuBot } from "./integrations/feishu";
 import { taskScheduler } from "./tasks";
 import { heartbeatSystem } from "./heartbeat";
+import { subAgentSystem } from "./subagents";
 
 const app = new Hono();
 
@@ -232,6 +233,32 @@ app.post("/api/heartbeat/file", async (c) => {
   fs.writeFileSync(heartbeatFile, content, "utf-8");
   
   return c.json({ success: true });
+});
+
+/**
+ * 子智能体 API
+ */
+app.get("/api/subagents", (c) => {
+  const runs = subAgentSystem.listRuns();
+  return c.json({ subagents: runs, count: runs.length });
+});
+
+app.get("/api/subagents/:id", (c) => {
+  const id = c.req.param("id");
+  const run = subAgentSystem.getRun(id);
+  
+  if (!run) {
+    return c.json({ error: "SubAgent not found" }, 404);
+  }
+  
+  return c.json(run);
+});
+
+app.delete("/api/subagents/:id", (c) => {
+  const id = c.req.param("id");
+  const success = subAgentSystem.killRun(id);
+  
+  return c.json({ success });
 });
 
 export default {

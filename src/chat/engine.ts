@@ -322,14 +322,36 @@ class ChatEngine {
     let response = await this.llm.invoke(messages);
     let responseText = response.content as string;
 
-    let { response: processedResponse, toolCalls } = await this.processToolCalls(responseText, sessionId);
+    const toolCalls = parseToolCalls(responseText);
 
-    if (ENABLE_SELF_REVIEW && toolCalls.length > 0) {
-      processedResponse = await this.selfReviewLoop(request.message, processedResponse, toolCalls, sessionId);
+    if (toolCalls.length > 0) {
+      const analysis = this.analyzeBeforeExecution(toolCalls, request.message);
+      
+      if (analysis.shouldSpawn) {
+        console.log(`[AutoSubAgent] Task complexity detected: ${analysis.reason}`);
+        
+        const existingRuns = subAgentSystem.listRuns(sessionId);
+        if (existingRuns.length < 5) {
+          for (const subTask of analysis.subTasks) {
+            await subAgentSystem.spawn({
+              task: subTask,
+              label: "auto-subagent",
+              mode: "run",
+              cleanup: "keep",
+            }, sessionId);
+            console.log(`[AutoSubAgent] Spawned sub-agent for: ${subTask.substring(0, 50)}...`);
+          }
+        }
+      }
     }
 
-    if (ENABLE_AUTO_SUBAGENT && toolCalls.length > 0) {
-      await this.maybeSpawnSubAgents(request.message, toolCalls, sessionId);
+    let { response: processedResponse, toolCalls: executedToolCalls } = await this.processToolCalls(responseText, sessionId);
+
+    if (ENABLE_SELF_REVIEW && executedToolCalls.length > 0) {
+      const hasFailures = executedToolCalls.some(tc => tc.error);
+      if (hasFailures) {
+        processedResponse = await this.selfReviewLoop(request.message, processedResponse, executedToolCalls, sessionId);
+      }
     }
 
     history.push(new HumanMessage(request.message));
@@ -470,6 +492,60 @@ ${readMemory()}
     } catch (error) {
       console.error("[Memory] Update failed:", error);
     }
+  }
+
+  private analyzeBeforeExecution(
+    toolCalls: { tool: string; args: Record<string, unknown> }[],
+    userMessage: string
+  ): { shouldSpawn: boolean; reason: string; subTasks: string[] } {
+    const uniqueTools = new Set(toolCalls.map(tc => tc.tool));
+    const toolCount = toolCalls.length;
+    
+    let subTasks: string[] = [];
+    let reason = "";
+    let shouldSpawn = false;
+
+    if (toolCount >= 3 || uniqueTools.size >= 3) {
+      shouldSpawn = true;
+      reason = `检测到 ${toolCount} 个工具调用，涉及 ${uniqueTools.size} 种工具`;
+      
+      for (const tc of toolCalls) {
+        if (tc.tool === "Write" || tc.tool === "Edit") {
+          subTasks.push(`${tc.tool}: ${tc.args.filePath || "未知文件"}`);
+        } else if (tc.tool === "Bash") {
+          subTasks.push(`执行命令: ${tc.args.command}`);
+        } else if (tc.tool === "Glob" || tc.tool === "Grep") {
+          subTasks.push(`搜索: ${tc.args.pattern || tc.args.filePath}`);
+        } else {
+          subTasks.push(`${tc.tool}: ${JSON.stringify(tc.args).substring(0, 50)}`);
+        }
+      }
+    }
+
+    const userMessageLower = userMessage.toLowerCase();
+    const complexKeywords = ["批量", "多个", "所有", "批量处理", "批量修改", "转换", "refactor", "batch"];
+    const hasComplexKeyword = complexKeywords.some(k => userMessageLower.includes(k));
+    
+    if (hasComplexKeyword && toolCount >= 2) {
+      shouldSpawn = true;
+      reason = "检测到复杂任务模式";
+      
+      if (subTasks.length === 0) {
+        subTasks = [userMessage];
+      }
+    }
+
+    const longCommands = ["npm install", "yarn", "pip install", "docker build", "docker run", "make"];
+    const hasLongCommand = toolCalls.some(tc => 
+      tc.tool === "Bash" && longCommands.some(cmd => (tc.args.command as string || "").toLowerCase().includes(cmd))
+    );
+    
+    if (hasLongCommand) {
+      shouldSpawn = true;
+      reason = "包含耗时较长的命令执行";
+    }
+
+    return { shouldSpawn, reason, subTasks };
   }
 
   private async maybeSpawnSubAgents(
