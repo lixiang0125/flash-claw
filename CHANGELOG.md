@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### 飞书消息确认优化 (2026-03-01)
+
+**目的**: 改进消息确认体验，使用飞书表情回复替代文本
+
+**改造点**:
+- 收到消息时自动添加 THINKING 表情，无需 LLM 生成
+- 实际回复和错误回复仍使用 LLM 生成，更友好
+- 参考 OpenClaw 实现添加 addReaction 方法
+
 ### 飞书 Skills 系统 (2026-03-01)
 
 **目的**: 完善 Skill 架构，定义何时使用飞书工具能力
