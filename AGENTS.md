@@ -42,6 +42,7 @@ bun run release
 - 每次代码变更后必须更新 README.md 和 CHANGELOG.md
 - 每次代码变更后必须推送到远端
 - 隐私文件（MEMORY.md, USER.md, SOUL.md, data/）不提交到远端
+- 测试完成后必须清理测试数据（尤其是 SQLite 中的定时任务），只删除自己测试时新增的任务，不要删除已有的任务
 
 ## 对话引擎
 

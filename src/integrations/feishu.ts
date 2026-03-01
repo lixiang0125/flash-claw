@@ -140,7 +140,7 @@ export class FeishuBot {
     );
 
     // 添加 emoji reaction 表示已收到消息（无需 LLM）
-    await this.addReaction(messageId, "THINKING");
+    await this.addReaction(messageId, "face:收到");
 
     // 后台处理实际请求
     setTimeout(async () => {
@@ -236,25 +236,31 @@ export class FeishuBot {
     try {
       const token = await this.getTenantAccessToken();
 
-      const client = new Lark.Client({
-        appId: this.config.appId,
-        appSecret: this.config.appSecret,
-        appType: Lark.AppType.SelfBuild,
-        domain: Lark.Domain.Feishu,
-      });
-
-      await client.im.messageReaction.create({
-        headers: { Authorization: `Bearer ${token}` },
-        path: { message_id: messageId },
-        requestBody: {
+      const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages/${messageId}/reactions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
           reaction_type: {
             emoji_type: emojiType,
           },
-        },
+        }),
       });
+
+      const text = await response.text();
+      console.log(`Feishu: Reaction response: ${text}`);
+
+      const data = JSON.parse(text);
+
+      if (data.code !== 0) {
+        throw new Error(`添加表情失败: ${data.msg}`);
+      }
+
       console.log(`Feishu: Added ${emojiType} reaction to message ${messageId}`);
-    } catch (error) {
-      console.error(`Feishu: Failed to add reaction:`, error);
+    } catch (error: any) {
+      console.error(`Feishu: Failed to add reaction:`, error.message || error);
     }
   }
 
