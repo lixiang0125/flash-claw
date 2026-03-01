@@ -29,6 +29,11 @@ All notable changes to this project will be documented in this file.
   - HEARTBEAT.md 配置
   - 支持时间窗口
   - 每 5 分钟检查一次
+- **记忆系统**: USER.md, SOUL.md, MEMORY.md
+  - USER.md: 用户个人信息
+  - SOUL.md: AI 人格定义
+  - MEMORY.md: 长期记忆
+  - 对话中自动更新
 
 ### 技术栈
 

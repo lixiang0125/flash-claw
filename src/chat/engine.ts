@@ -4,6 +4,7 @@ import { listSkills, getSkill, type Skill } from "../skills";
 import { TOOLS, executeTool, type ToolResult } from "../tools";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
+import { readUser, readSoul, readMemory, updateMemory, extractInfoToRemember } from "../memory";
 import type { ChatRequest, ChatResponse } from "./types";
 import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
 
@@ -58,14 +59,19 @@ class ChatEngine {
     const skills = this.getSessionSkills(sessionId);
     const availableSkills = listSkills().filter(s => !s.disable_model_invocation);
     
-    const profile = userProfileStore.get(sessionId);
-    const profileMarkdown = userProfileStore.toMarkdown(profile);
+    const soulContent = readSoul();
+    const userContent = readUser();
+    const memoryContent = readMemory();
     
-    let systemPrompt = "You are a helpful AI assistant.";
+    let systemPrompt = soulContent + "\n\n";
     
-    systemPrompt += "\n\n## User Profile\n";
-    systemPrompt += "这是当前用户的画像信息，请根据这些信息提供更个性化的服务：\n";
-    systemPrompt += profileMarkdown + "\n";
+    systemPrompt += "## User Information (USER.md)\n";
+    systemPrompt += "这是用户的个人信息，请根据这些信息提供更个性化的服务：\n";
+    systemPrompt += userContent + "\n";
+    
+    systemPrompt += "## Long-term Memory (MEMORY.md)\n";
+    systemPrompt += "这是用户的长期记忆，重要的事情会被记录：\n";
+    systemPrompt += memoryContent + "\n";
     
     systemPrompt += "\n\n## Available Tools\n";
     systemPrompt += "You can use tools to help with tasks. When you need to use a tool, respond with:\n";
@@ -230,12 +236,67 @@ class ChatEngine {
     history.push(new HumanMessage(request.message));
     history.push(new AIMessage(finalResponse));
 
+    // 检查是否需要更新记忆
+    this.maybeUpdateMemory(request.message, finalResponse);
+
     return {
       response: finalResponse,
       sessionId,
       skills: this.getSessionSkills(sessionId),
       autoMatched,
     };
+  }
+
+  /**
+   * 检查并更新记忆（USER.md 和 MEMORY.md）
+   */
+  private async maybeUpdateMemory(userMessage: string, _assistantResponse: string): Promise<void> {
+    const infoToRemember = extractInfoToRemember(userMessage);
+    if (!infoToRemember) return;
+
+    try {
+      if (infoToRemember.type === "user") {
+        // 更新 USER.md
+        const updatePrompt = `用户告诉你了一些个人信息，需要更新到 USER.md 中。
+
+当前 USER.md 内容:
+${readUser()}
+
+用户说的信息: "${userMessage}"
+
+请提取并更新 USER.md 中对应的信息。只更新相关部分，保留其他内容。
+请直接回复更新后的完整 USER.md 内容，不要添加任何解释。`;
+
+        const llmResponse = await this.llm.invoke([new HumanMessage(updatePrompt)]);
+        const content = llmResponse.content as string;
+
+        if (content.includes("#") && content.length > 50) {
+          updateUser(content);
+          console.log("[USER.md] Updated from conversation");
+        }
+      } else {
+        // 更新 MEMORY.md
+        const updatePrompt = `用户告诉你了一些重要的事情，需要决定是否要更新到 MEMORY.md 中。
+
+当前 MEMORY.md 内容:
+${readMemory()}
+
+用户说的信息: "${userMessage}"
+
+请判断这条信息是否值得永久记住。如果是，请给出更新后的 MEMORY.md 内容。如果不是，请回复"不需要记住"。
+请直接回复更新后的内容，不要添加任何解释。`;
+
+        const llmResponse = await this.llm.invoke([new HumanMessage(updatePrompt)]);
+        const content = llmResponse.content as string;
+
+        if (!content.includes("不需要记住") && content.length > 20) {
+          updateMemory(content);
+          console.log("[MEMORY.md] Updated from conversation");
+        }
+      }
+    } catch (error) {
+      console.error("[Memory] Update failed:", error);
+    }
   }
 
   clearSession(sessionId: string): void {

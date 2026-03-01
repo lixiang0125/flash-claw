@@ -146,7 +146,11 @@ class UserProfileStore {
   /**
    * 转换为 Markdown 格式
    */
-  toMarkdown(profile: UserProfile): string {
+  toMarkdown(profile: UserProfile | null): string {
+    if (!profile) {
+      return "暂无用户信息";
+    }
+
     if (!profile.name && !profile.email && !profile.company && !profile.role && !profile.bio && !profile.preferences) {
       return "暂无用户信息";
     }
