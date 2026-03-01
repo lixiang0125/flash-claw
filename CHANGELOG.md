@@ -2,8 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## 2026-03-02
-
 ### Heartbeat 心跳系统升级 (2026-03-02)
 
 **目的**: 改进心跳系统，使其能真正检测问题并通知用户
