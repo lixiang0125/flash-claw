@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import * as cronParser from "cron-parser";
+import { CronExpressionParser } from "cron-parser";
 import path from "path";
 import { chatEngine } from "../chat";
 
@@ -225,7 +225,7 @@ class TaskScheduler {
 
   private calculateNextRun(schedule: string): string | null {
     try {
-      const interval = cronParser.parseExpression(schedule);
+      const interval = CronExpressionParser.parse(schedule);
       return interval.next().toDate().toISOString();
     } catch {
       return null;

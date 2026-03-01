@@ -5,7 +5,7 @@ import { TOOLS, executeTool, type ToolResult } from "../tools";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
 import type { ChatRequest, ChatResponse } from "./types";
-import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls } from "./parsers";
+import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
 
 const useQwen = !!process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.includes("dashscope");
 
@@ -175,8 +175,10 @@ class ChatEngine {
           enabled: true,
         });
         
+        const scheduleText = cronToHumanReadable(taskInfo.schedule);
+        
         return {
-          response: `好的！我已经创建了定时任务「${task.name}」，将在 ${taskInfo.schedule} 执行。\n\n任务 ID: ${task.id}\n\n你可以说"取消任务"来删除它。`,
+          response: `好的！我已经创建了定时任务「${task.name}」，将在 ${scheduleText} 执行。\n\n任务 ID: ${task.id}\n\n你可以说"取消任务"来删除它。`,
           sessionId,
         };
       } catch (error: unknown) {

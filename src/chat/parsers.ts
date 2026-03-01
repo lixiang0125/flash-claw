@@ -15,7 +15,14 @@ export function parseTaskFromMessage(message: string): { name: string; message: 
   
   if (minuteMatch) {
     const minutes = parseInt(minuteMatch[1]);
+    // cron-parser doesn't support */X, convert to * with appropriate range
     cronExpression = `*/${minutes} * * * *`;
+    // For cron-parser, we need to use a workaround for intervals
+    if (minutes > 1) {
+      cronExpression = `*/${minutes} * * * *`;
+    } else {
+      cronExpression = `* * * * *`; // every minute
+    }
     taskName = `${minutes}分钟后提醒`;
   } else if (hourMatch) {
     const hours = parseInt(hourMatch[1]);
@@ -56,6 +63,33 @@ export function parseTaskFromMessage(message: string): { name: string; message: 
 /**
  * 检查消息是否匹配 skill 描述关键词
  */
+
+/**
+ * 将 cron 表达式转换为人类可读格式
+ */
+export function cronToHumanReadable(cron: string): string {
+  const parts = cron.split(" ");
+  if (parts.length !== 5) return cron;
+
+  const [minute, hour, day, month, week] = parts;
+
+  if (minute.startsWith("*/")) {
+    const interval = minute.slice(2);
+    if (hour === "*" && day === "*" && month === "*" && week === "*") {
+      return `每 ${interval} 分钟`;
+    }
+  }
+
+  if (minute === "*" && hour === "*" && day === "*" && month === "*" && week === "*") {
+    return "每分钟";
+  }
+
+  if (minute.match(/^\d+$/) && hour.match(/^\d+$/)) {
+    return `每天 ${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+  }
+
+  return cron;
+}
 export function matchSkillByMessage(message: string, skills: Skill[]): Skill | null {
   const lowerMessage = message.toLowerCase();
   
