@@ -263,6 +263,20 @@ flash-claw/
 | FEISHU_APP_ID | 飞书应用 ID |
 | FEISHU_APP_SECRET | 飞书应用密钥 |
 
+## CLI 命令行工具
+
+Flash Claw 提供命令行工具，方便快速操作:
+
+```bash
+flashclaw run                   # 启动服务器
+flashclaw tasks                 # 列出所有任务
+flashclaw tasks --cleanall      # 清除所有任务
+flashclaw tasks --run <id>      # 手动触发任务
+flashclaw skills                # 列出所有 Skills
+flashclaw skills <name>         # 获取指定 Skill 详情
+flashclaw help                  # 显示帮助信息
+```
+
 ## 发布
 
 每次代码变更后运行:

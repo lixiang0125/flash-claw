@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
   - 工具重试: 失败时自动重试（最多3次），分析错误并修正参数
   - 质量阈值循环: 工具执行失败后 AI 自我审查
   - 多轮反馈: 迭代改进直到成功或达到最大迭代次数
+- **CLI 命令行工具**: flashclaw 命令
+  - `flashclaw run` 启动服务器
+  - `flashclaw tasks` 任务管理
+  - `flashclaw tasks --cleanall` 清除所有任务
+  - `flashclaw skills` 列出 Skills
 
 ### Changed
 
