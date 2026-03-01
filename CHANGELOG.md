@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### 飞书 Skills 系统 (2026-03-01)
+
+**目的**: 完善 Skill 架构，定义何时使用飞书工具能力
+
+**改造点**:
+- 创建 `.flashclaw/skills/feishu-doc/SKILL.md`: 飞书文档操作技能
+- 创建 `.flashclaw/skills/feishu-drive/SKILL.md`: 飞书云盘管理技能
+- 创建 `.flashclaw/skills/feishu-perm/SKILL.md`: 飞书权限管理技能
+- 创建 `.flashclaw/skills/feishu-wiki/SKILL.md`: 飞书 Wiki 知识库技能
+- 更新 README.md 添加内置 Skills 说明
+
+架构说明: Tools 定义"如何做"（代码实现），Skills 定义"何时用"（策略定义）
+
 ### 对话驱动进化系统 (2026-03-01)
 
 **目的**: 类似 OpenClaw，让用户通过自然语言对话驱动 Agent 持续进化

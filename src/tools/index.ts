@@ -173,6 +173,98 @@ const WebFetchTool: Tool = {
 };
 
 /**
+ * 飞书文档工具
+ */
+const FeishuDocTool: Tool = {
+  name: "FeishuDoc",
+  description: "飞书文档读写操作。支持读取、写入、创建文档，以及操作表格、图片等。",
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", description: "操作: read, write, append, create, list_blocks, get_block, update_block, delete_block, create_table, write_table_cells, upload_image, upload_file" },
+      doc_token: { type: "string", description: "文档 token" },
+      content: { type: "string", description: "文档内容 (write/append)" },
+      title: { type: "string", description: "文档标题 (create)" },
+      folder_token: { type: "string", description: "文件夹 token" },
+      owner_open_id: { type: "string", description: "所有者 open_id" },
+      block_id: { type: "string", description: "Block ID" },
+      row_size: { type: "number", description: "表格行数" },
+      column_size: { type: "number", description: "表格列数" },
+      column_width: { type: "array", description: "列宽" },
+      table_block_id: { type: "string", description: "表格 block ID" },
+      values: { type: "array", description: "表格值" },
+      url: { type: "string", description: "图片/文件 URL" },
+      file_path: { type: "string", description: "本地文件路径" },
+      filename: { type: "string", description: "文件名" },
+      parent_block_id: { type: "string", description: "父 Block ID" },
+      index: { type: "number", description: "位置索引" },
+    },
+    required: ["action"],
+  },
+};
+
+/**
+ * 飞书云盘工具
+ */
+const FeishuDriveTool: Tool = {
+  name: "FeishuDrive",
+  description: "飞书云盘文件管理。支持列出文件夹、获取文件信息、创建文件夹、移动/删除文件。",
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", description: "操作: list, info, create_folder, move, delete" },
+      folder_token: { type: "string", description: "文件夹 token" },
+      file_token: { type: "string", description: "文件 token" },
+      name: { type: "string", description: "名称" },
+      type: { type: "string", description: "文件类型: doc, docx, sheet, bitable, folder, file, mindnote, shortcut" },
+    },
+    required: ["action"],
+  },
+};
+
+/**
+ * 飞书权限工具
+ */
+const FeishuPermTool: Tool = {
+  name: "FeishuPerm",
+  description: "飞书文档权限管理。列出、添加、移除协作者。",
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", description: "操作: list, add, remove" },
+      token: { type: "string", description: "文档/文件 token" },
+      type: { type: "string", description: "类型: doc, docx, sheet, bitable, folder, file, wiki, mindnote" },
+      member_type: { type: "string", description: "成员类型: email, openid, userid, unionid, openchat, opendepartmentid" },
+      member_id: { type: "string", description: "成员 ID" },
+      perm: { type: "string", description: "权限: view, edit, full_access" },
+    },
+    required: ["action", "token", "type"],
+  },
+};
+
+/**
+ * 飞书 Wiki 工具
+ */
+const FeishuWikiTool: Tool = {
+  name: "FeishuWiki",
+  description: "飞书知识库操作。列出知识空间、节点，获取/创建/移动/重命名 Wiki 页面。",
+  parameters: {
+    type: "object",
+    properties: {
+      action: { type: "string", description: "操作: spaces, nodes, get, create, move, rename" },
+      space_id: { type: "string", description: "知识空间 ID" },
+      token: { type: "string", description: "Wiki token" },
+      parent_node_token: { type: "string", description: "父节点 token" },
+      title: { type: "string", description: "标题" },
+      obj_type: { type: "string", description: "对象类型: docx, sheet, bitable, mindnote, file, doc, slides" },
+      target_space_id: { type: "string", description: "目标空间 ID" },
+      target_parent_token: { type: "string", description: "目标父节点 token" },
+    },
+    required: ["action"],
+  },
+};
+
+/**
  * 互联网搜索工具
  */
 const WebSearchTool: Tool = {
@@ -242,7 +334,7 @@ const SubAgentTool: Tool = {
   },
 };
 
-export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, WebSearchTool, GetProfileTool, UpdateProfileTool, SubAgentTool];
+export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, WebSearchTool, FeishuDocTool, FeishuDriveTool, FeishuPermTool, FeishuWikiTool, GetProfileTool, UpdateProfileTool, SubAgentTool];
 
 /**
  * 执行工具
@@ -269,6 +361,14 @@ export async function executeTool(
         return executeWebFetch(args.url, args.format);
       case "WebSearch":
         return executeWebSearch(args.query, args.numResults);
+      case "FeishuDoc":
+        return executeFeishuDoc(args);
+      case "FeishuDrive":
+        return executeFeishuDrive(args);
+      case "FeishuPerm":
+        return executeFeishuPerm(args);
+      case "FeishuWiki":
+        return executeFeishuWiki(args);
       case "GetProfile":
         return executeGetProfile(args.sessionId);
       case "UpdateProfile":
@@ -534,6 +634,266 @@ async function executeWebSearch(query: string, numResults?: number): Promise<Too
       return { tool: "WebSearch", output: "", error: "搜索超时，请稍后重试" };
     }
     return { tool: "WebSearch", output: "", error: error.message };
+  }
+}
+
+/**
+ * 飞书 API 客户端
+ */
+let feishuClient: any = null;
+
+async function getFeishuClient() {
+  if (feishuClient) return feishuClient;
+  
+  const Lark = require("@larksuiteoapi/node-sdk");
+  
+  feishuClient = new Lark.Client({
+    appId: process.env.FEISHU_APP_ID,
+    appSecret: process.env.FEISHU_APP_SECRET,
+    logLevel: LogLevel.WARN,
+  });
+  
+  return feishuClient;
+}
+
+async function getTenantAccessToken(): Promise<string> {
+  const client = await getFeishuClient();
+  const response = await client.auth.getTenantAccessToken({
+    appId: process.env.FEISHU_APP_ID!,
+    appSecret: process.env.FEISHU_APP_SECRET!,
+  });
+  
+  if (response.code !== 0) {
+    throw new Error(`飞书认证失败: ${response.msg}`);
+  }
+  
+  return response.data.tenant_access_token;
+}
+
+/**
+ * 执行飞书文档操作
+ */
+async function executeFeishuDoc(args: Record<string, unknown>): Promise<ToolResult> {
+  const action = args.action as string;
+  
+  try {
+    const token = await getTenantAccessToken();
+    const docToken = args.doc_token as string;
+    
+    const client = await getFeishuClient();
+    let result: any = null;
+    
+    switch (action) {
+      case "read": {
+        const response = await client.docx.document.get({
+          headers: { Authorization: `Bearer ${token}` },
+          documentId: docToken,
+        });
+        result = response.data;
+        break;
+      }
+      case "write":
+      case "append": {
+        const content = args.content as string;
+        const blocks = [{ type: "markdown", markdown: { text: content } }];
+        await client.docx.documentBlock.append({
+          headers: { Authorization: `Bearer ${token}` },
+          documentId: docToken,
+          requestBody: { block: blocks[0] },
+        });
+        result = { success: true, message: "内容已写入" };
+        break;
+      }
+      case "create": {
+        const title = args.title as string;
+        const folderToken = args.folder_token as string;
+        const ownerOpenId = args.owner_open_id as string;
+        
+        const response = await client.docx.createDocument({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: {
+            folder_token: folderToken,
+            title: title,
+            owner_open_id: ownerOpenId,
+          },
+        });
+        result = response.data;
+        break;
+      }
+      case "list_blocks": {
+        const response = await client.docx.documentBlock.list({
+          headers: { Authorization: `Bearer ${token}` },
+          documentId: docToken,
+        });
+        result = response.data;
+        break;
+      }
+      default:
+        return { tool: "FeishuDoc", output: "", error: `不支持的操作: ${action}` };
+    }
+    
+    return { tool: "FeishuDoc", output: JSON.stringify(result, null, 2) };
+  } catch (error: any) {
+    return { tool: "FeishuDoc", output: "", error: error.message || "飞书文档操作失败" };
+  }
+}
+
+/**
+ * 执行飞书云盘操作
+ */
+async function executeFeishuDrive(args: Record<string, unknown>): Promise<ToolResult> {
+  const action = args.action as string;
+  
+  try {
+    const token = await getTenantAccessToken();
+    const client = await getFeishuClient();
+    let result: any = null;
+    
+    switch (action) {
+      case "list": {
+        const folderToken = args.folder_token as string;
+        const response = await client.drive.list({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: {
+            folder_token: folderToken || "root",
+            page_size: 100,
+          },
+        });
+        result = response.data;
+        break;
+      }
+      case "info": {
+        const fileToken = args.file_token as string;
+        const type = args.type as string;
+        const response = await client.drive.getFileInfo({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: { file_token: fileToken },
+        });
+        result = response.data;
+        break;
+      }
+      case "create_folder": {
+        const name = args.name as string;
+        const folderToken = args.folder_token as string;
+        const response = await client.drive.createFolder({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: {
+            name: name,
+            folder_token: folderToken || "root",
+          },
+        });
+        result = response.data;
+        break;
+      }
+      default:
+        return { tool: "FeishuDrive", output: "", error: `不支持的操作: ${action}` };
+    }
+    
+    return { tool: "FeishuDrive", output: JSON.stringify(result, null, 2) };
+  } catch (error: any) {
+    return { tool: "FeishuDrive", output: "", error: error.message || "飞书云盘操作失败" };
+  }
+}
+
+/**
+ * 执行飞书权限操作
+ */
+async function executeFeishuPerm(args: Record<string, unknown>): Promise<ToolResult> {
+  const action = args.action as string;
+  
+  try {
+    const token = await getTenantAccessToken();
+    const client = await getFeishuClient();
+    let result: any = null;
+    
+    switch (action) {
+      case "list": {
+        const fileToken = args.token as string;
+        const type = args.type as string;
+        const response = await client.drive.permissionMember.list({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: { token: fileToken, type: type },
+        });
+        result = response.data;
+        break;
+      }
+      default:
+        return { tool: "FeishuPerm", output: "", error: `不支持的操作: ${action}` };
+    }
+    
+    return { tool: "FeishuPerm", output: JSON.stringify(result, null, 2) };
+  } catch (error: any) {
+    return { tool: "FeishuPerm", output: "", error: error.message || "飞书权限操作失败" };
+  }
+}
+
+/**
+ * 执行飞书 Wiki 操作
+ */
+async function executeFeishuWiki(args: Record<string, unknown>): Promise<ToolResult> {
+  const action = args.action as string;
+  
+  try {
+    const token = await getTenantAccessToken();
+    const client = await getFeishuClient();
+    let result: any = null;
+    
+    switch (action) {
+      case "spaces": {
+        const response = await client.wiki.listSpaces({
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        result = response.data;
+        break;
+      }
+      case "nodes": {
+        const spaceId = args.space_id as string;
+        const parentToken = args.parent_node_token as string;
+        const response = await client.wiki.listNodes({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: {
+            space_id: spaceId,
+            parent_node_token: parentToken,
+            page_size: 100,
+          },
+        });
+        result = response.data;
+        break;
+      }
+      case "get": {
+        const wikiToken = args.token as string;
+        const response = await client.wiki.getNode({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: { token: wikiToken },
+        });
+        result = response.data;
+        break;
+      }
+      case "create": {
+        const spaceId = args.space_id as string;
+        const title = args.title as string;
+        const parentToken = args.parent_node_token as string;
+        const objType = args.obj_type as string;
+        
+        const response = await client.wiki.createNode({
+          headers: { Authorization: `Bearer ${token}` },
+          requestBody: {
+            space_id: spaceId,
+            obj_type: objType || "docx",
+            parent_node_token: parentToken,
+            title: title,
+          },
+        });
+        result = response.data;
+        break;
+      }
+      default:
+        return { tool: "FeishuWiki", output: "", error: `不支持的操作: ${action}` };
+    }
+    
+    return { tool: "FeishuWiki", output: JSON.stringify(result, null, 2) };
+  } catch (error: any) {
+    return { tool: "FeishuWiki", output: "", error: error.message || "飞书 Wiki 操作失败" };
   }
 }
 

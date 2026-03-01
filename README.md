@@ -114,6 +114,21 @@ AI 会记住用户的信息。包含三个文件：
 
 符合 Claude Code Agent Skills 标准，可加载预设的技能增强 AI 能力。
 
+### 内置 Skills
+
+#### 飞书 Skills
+
+AI 具备飞书文档、云盘、权限、Wiki 的操作能力：
+
+| Skill | 描述 |
+|-------|------|
+| feishu-doc | 飞书文档操作（创建、读取、写入） |
+| feishu-drive | 飞书云盘管理（浏览文件、创建文件夹） |
+| feishu-perm | 飞书权限管理（查看分享权限） |
+| feishu-wiki | 飞书 Wiki 知识库操作 |
+
+这些 Skill 使 AI 能够在对话中直接操作飞书资源。
+
 ## 飞书集成
 
 支持两种接入方式:

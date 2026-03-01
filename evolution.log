@@ -1,0 +1,2 @@
+2026-03-01T14:02:48.792Z | fc-evolve-20240115-001 | tool_fix | 修复 WebFetch 工具无法抓取微信公众号文章的问题，增加反爬策略处理 | success
+2026-03-01T14:04:58.478Z | fc-evolve-20240115-002 | skill_add | 新增公众号文章抓取专用 Skill，作为 WebFetch 工具的补充方案，处理反爬和格式转换 | success
