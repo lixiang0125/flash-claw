@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { chatEngine, type ChatRequest } from "./chat";
 import { listSkills, searchSkills, getSkill, executeScript } from "./skills";
+import { feishuBot } from "./integrations/feishu";
 
 const app = new Hono();
 
@@ -68,6 +69,35 @@ app.post("/api/skills/:name/exec", async (c) => {
   }
   
   return c.json(result);
+});
+
+/**
+ * 飞书 Webhook 端点
+ * 用于接收飞书机器人消息
+ */
+app.post("/api/webhooks/feishu", async (c) => {
+  if (!feishuBot.isConfigured()) {
+    return c.json({ error: "Feishu bot not configured" }, 400);
+  }
+
+  try {
+    const body = await c.req.json();
+    const result = await feishuBot.handleEvent(body);
+    return c.json(result);
+  } catch (error) {
+    console.error("Feishu webhook error:", error);
+    return c.json({ error: "Webhook processing failed" }, 500);
+  }
+});
+
+/**
+ * 飞书配置检查端点
+ */
+app.get("/api/webhooks/feishu/status", (c) => {
+  return c.json({
+    configured: feishuBot.isConfigured(),
+    config: feishuBot.getConfig(),
+  });
 });
 
 export default {

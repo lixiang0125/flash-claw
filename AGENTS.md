@@ -118,3 +118,34 @@ AI 在响应中使用以下格式触发工具：
 ```
 [TOOL_CALL]<tool_name>:{<args>}[/TOOL_CALL]
 ```
+
+## IM 集成
+
+支持接入外部 IM 系统（如飞书、企业微信等）。
+
+### 飞书机器人
+
+#### 配置方式
+
+**方式1: Webhook (简单)**
+```
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+```
+
+**方式2: 开放平台 API (完整功能)**
+```
+FEISHU_APP_ID=your-app-id
+FEISHU_APP_SECRET=your-app-secret
+```
+
+#### API 端点
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| POST | /api/webhooks/feishu | 飞书 Webhook 接收地址 |
+
+#### 使用方式
+
+1. 在飞书创建自定义机器人，获取 Webhook URL
+2. 配置环境变量
+3. 将 Webhook URL 配置为服务地址
