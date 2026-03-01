@@ -133,7 +133,20 @@
 - 工具执行后调用 LLM 生成友好的总结回复
 - 不再显示原始的 `[TOOL_RESULT]` 标记
 - 回复更加自然，像正常对话一样
-  - `Glob`: 文件搜索
-  - `Grep`: 内容搜索
-- 修改 `src/chat.ts`: 在 System Prompt 中注入工具说明
-- 前端添加工具调用结果显示
+
+## 2024-03-01 - 飞书机器人集成
+
+**目的**: 接入飞书 IM 系统，支持在飞书中与 AI 对话
+
+**改造点**:
+- 创建 `src/integrations/feishu.ts`: 飞书机器人模块
+  - 支持两种接入方式: Webhook (简单) 和 App API (完整)
+  - Webhook 模式: 接收消息并回复
+  - App API 模式: 支持更多功能 (卡片消息、@机器人等)
+- 添加 API 端点:
+  - `POST /api/webhooks/feishu`: 飞书 Webhook 接收地址
+  - `GET /api/webhooks/feishu/status`: 配置检查
+- 环境变量配置:
+  - `FEISHU_WEBHOOK_URL`: Webhook 地址
+  - `FEISHU_APP_ID`: 应用 ID
+  - `FEISHU_APP_SECRET`: 应用密钥
