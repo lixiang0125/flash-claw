@@ -58,7 +58,7 @@ AI 具有实际执行操作的能力，可以在对话中直接操作文件:
 - **Bash**: 执行 shell 命令
 - **Glob**: 文件搜索
 - **Grep**: 内容搜索
-- **WebFetch**: 获取网页内容
+- **WebFetch**: 获取网页内容（使用 Jina AI Reader）
 - **WebSearch**: 互联网搜索（使用 Tavily）
 - **GetProfile**: 获取用户画像
 - **UpdateProfile**: 更新用户画像

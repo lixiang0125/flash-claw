@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### Jina AI Reader WebFetch (2026-03-01)
+
+**目的**: 替换不稳定的 WebFetch 实现，使用免费的 Jina AI Reader API
+
+**改造点**:
+- 修改 `src/tools/index.ts` 中的 `executeWebFetch` 函数
+- 使用 Jina AI Reader API: `https://r.jina.ai/<URL>`
+- 大幅简化代码，移除 jsdom 和 readability 依赖
+- 更稳定、更快的网页内容获取
+
 ### WebSearch 互联网搜索 (2026-03-01)
 
 **目的**: 让 AI 能够搜索互联网获取最新信息
