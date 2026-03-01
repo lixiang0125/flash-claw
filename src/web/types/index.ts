@@ -6,6 +6,16 @@ export interface Message {
   content: string;
   role: 'user' | 'assistant';
   timestamp: number;
+  toolCalls?: ToolResult[];
+}
+
+/**
+ * 工具执行结果
+ */
+export interface ToolResult {
+  tool: string;
+  output: string;
+  error?: string;
 }
 
 /**
@@ -24,6 +34,8 @@ export interface ChatResponse {
   response: string;
   sessionId: string;
   skills?: Skill[];
+  autoMatched?: string;
+  toolCalls?: ToolResult[];
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import type { Message } from '../types';
+import type { Message, ToolResult } from '../types';
 import { sendMessage, clearSession } from '../api/chat';
 
 /**
@@ -45,6 +45,7 @@ export function useChat() {
         content: response.response,
         role: 'assistant',
         timestamp: Date.now(),
+        toolCalls: response.toolCalls,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);

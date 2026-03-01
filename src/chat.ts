@@ -1,6 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { listSkills, getSkill, type Skill } from "./skills";
+import { TOOLS, executeTool, type ToolResult } from "./tools";
 
 export interface ChatRequest {
   message: string;
@@ -35,6 +36,34 @@ function matchSkillByMessage(message: string, skills: Skill[]): Skill | null {
   }
   
   return null;
+}
+
+/**
+ * 解析模型响应中的工具调用
+ */
+function parseToolCalls(response: string): { tool: string; args: Record<string, any> }[] {
+  const toolCalls: { tool: string; args: Record<string, any> }[] = [];
+  
+  const patterns = [
+    /\[TOOL_CALL\]\s*(\w+)\s*:\s*(\{[\s\S]*?\})\s*\[\/TOOL_CALL\]/g,
+    /<tool_call>\s*<tool>\s*(\w+)\s*<\/tool>\s*<args>\s*(\{[\s\S]*?\})\s*<\/args>\s*<\/tool_call>/g,
+  ];
+
+  for (const pattern of patterns) {
+    const matches = response.matchAll(pattern);
+    for (const match of matches) {
+      try {
+        toolCalls.push({
+          tool: match[1],
+          args: JSON.parse(match[2]),
+        });
+      } catch {
+        // Continue to next pattern
+      }
+    }
+  }
+
+  return toolCalls;
 }
 
 class ChatEngine {
@@ -88,9 +117,19 @@ class ChatEngine {
     
     let systemPrompt = "You are a helpful AI assistant.";
     
+    systemPrompt += "\n\n## Available Tools\n";
+    systemPrompt += "You can use tools to help with tasks. When you need to use a tool, respond with:\n";
+    systemPrompt += "[TOOL_CALL]<tool_name>:{<args>}[/TOOL_CALL]\n\n";
+    
+    for (const tool of TOOLS) {
+      systemPrompt += `### ${tool.name}\n`;
+      systemPrompt += `${tool.description}\n`;
+      systemPrompt += `Parameters: ${JSON.stringify(tool.parameters.properties)}\n\n`;
+    }
+    
     if (availableSkills.length > 0) {
-      systemPrompt += "\n\n## Available Skills\n";
-      systemPrompt += "When user asks about these topics, you should activate the relevant skill.\n";
+      systemPrompt += "\n## Available Skills\n";
+      systemPrompt += "When user asks about these topics, you can activate the relevant skill.\n";
       
       for (const skill of availableSkills) {
         systemPrompt += `\n### ${skill.name}\n`;
@@ -100,8 +139,6 @@ class ChatEngine {
     
     if (skills.length > 0) {
       systemPrompt += "\n\n## Active Skills\n";
-      systemPrompt += "The following skills are active for this conversation:\n";
-      
       for (const skill of skills) {
         systemPrompt += `\n### ${skill.name}\n`;
         systemPrompt += `${skill.instructions}\n`;
@@ -113,6 +150,34 @@ class ChatEngine {
     }
     
     return systemPrompt;
+  }
+
+  /**
+   * 处理工具调用
+   */
+  private async processToolCalls(
+    response: string,
+    sessionId: string
+  ): Promise<{ response: string; toolCalls: ToolResult[] }> {
+    const toolCalls = parseToolCalls(response);
+    if (toolCalls.length === 0) {
+      return { response, toolCalls: [] };
+    }
+
+    const results: ToolResult[] = [];
+    let finalResponse = response;
+
+    for (const tc of toolCalls) {
+      console.log(`Executing tool: ${tc.tool}`, tc.args);
+      const result = await executeTool(tc.tool, tc.args);
+      results.push(result);
+      finalResponse = finalResponse.replace(
+        /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/,
+        `[TOOL_RESULT]${result.error ? `Error: ${result.error}\n` : result.output}[/TOOL_RESULT]`
+      );
+    }
+
+    return { response: finalResponse, toolCalls: results };
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
@@ -141,12 +206,15 @@ class ChatEngine {
     const messages = [systemMessage, ...history, new HumanMessage(request.message)];
 
     const response = await this.llm.invoke(messages);
+    const responseText = response.content as string;
+
+    const { response: finalResponse, toolCalls } = await this.processToolCalls(responseText, sessionId);
 
     history.push(new HumanMessage(request.message));
-    history.push(new AIMessage(response.content as string));
+    history.push(new AIMessage(finalResponse));
 
     return {
-      response: response.content as string,
+      response: finalResponse,
       sessionId,
       skills: this.getSessionSkills(sessionId),
       autoMatched,
