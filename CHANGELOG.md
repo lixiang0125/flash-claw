@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### 子智能体自动触发 (2026-03-01)
+
+**目的**: 让系统能够自动检测复杂任务并创建子智能体，无需 AI 主动调用
+
+**改造点**:
+- 创建 `src/subagents/analyzer.ts`: 任务复杂度分析器
+  - `analyzeComplexity()`: 检测任务复杂度
+    - 多文件操作: 涉及 3+ 文件时触发
+    - 多个独立任务: 可分解为并行子任务时触发
+    - 耗时长命令: npm install、docker build 等
+  - `splitIntoSubTasks()`: 将任务分解为子任务
+- 修改 `src/chat/engine.ts`:
+  - 添加 `maybeSpawnSubAgents()` 方法
+  - 在工具执行后自动分析复杂度
+  - 满足条件时自动创建子智能体
+- System Message 添加 SubAgent 使用指南
+- README 更新功能说明
+
 ### 子智能体系统 (2026-03-01)
 
 **目的**: 类似 OpenClaw 的 sub-agents 机制，支持 AI 并行处理耗时任务

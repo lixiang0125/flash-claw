@@ -5,6 +5,8 @@ import { TOOLS, executeTool, type ToolResult } from "../tools";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
 import { readUser, readSoul, readMemory, updateMemory, updateUser, extractInfoToRemember } from "../memory";
+import { subAgentSystem } from "../subagents";
+import { analyzeComplexity } from "../subagents/analyzer";
 import type { ChatRequest, ChatResponse } from "./types";
 import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
 
@@ -13,6 +15,7 @@ const useQwen = !!process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.inc
 const MAX_TOOL_RETRIES = 3;
 const MAX_ITERATIONS = 3;
 const ENABLE_SELF_REVIEW = true;
+const ENABLE_AUTO_SUBAGENT = true;
 
 class ChatEngine {
   private llm: ChatOpenAI;
@@ -86,6 +89,24 @@ class ChatEngine {
       systemPrompt += `${tool.description}\n`;
       systemPrompt += `Parameters: ${JSON.stringify(tool.parameters.properties)}\n\n`;
     }
+
+    systemPrompt += `
+## SubAgent 使用指南
+
+对于复杂耗时的任务，你可以考虑使用 SubAgent 工具启动子智能体并行处理：
+
+**建议使用子智能体的场景**:
+- 多文件操作: 涉及 3 个以上文件的读写/编辑
+- 多个独立任务: 任务可分解为多个并行执行的子任务
+- 耗时长命令: npm install、docker build、编译等
+- 批量处理: 批量修改文件、批量搜索等
+
+**调用方式**:
+[TOOL_CALL]<SubAgent>:{"task": "子任务描述", "label": "任务标签"}[/TOOL_CALL]
+
+子智能体会在后台独立运行，完成后自动向主会话报告结果。
+
+`;
     
     if (availableSkills.length > 0) {
       systemPrompt += "\n## Available Skills\n";
@@ -307,6 +328,10 @@ class ChatEngine {
       processedResponse = await this.selfReviewLoop(request.message, processedResponse, toolCalls, sessionId);
     }
 
+    if (ENABLE_AUTO_SUBAGENT && toolCalls.length > 0) {
+      await this.maybeSpawnSubAgents(request.message, toolCalls, sessionId);
+    }
+
     history.push(new HumanMessage(request.message));
     history.push(new AIMessage(processedResponse));
 
@@ -444,6 +469,41 @@ ${readMemory()}
       }
     } catch (error) {
       console.error("[Memory] Update failed:", error);
+    }
+  }
+
+  private async maybeSpawnSubAgents(
+    userMessage: string,
+    toolCalls: ToolResult[],
+    sessionId: string
+  ): Promise<void> {
+    const parsedToolCalls = toolCalls.map(tc => ({ tool: tc.tool, args: tc as unknown as Record<string, unknown> }));
+    const analysis = analyzeComplexity(parsedToolCalls, userMessage);
+
+    if (!analysis.shouldUseSubAgent) {
+      return;
+    }
+
+    console.log(`[AutoSubAgent] Task complexity detected: ${analysis.reason}`);
+    console.log(`[AutoSubAgent] Estimated files: ${analysis.estimatedFiles}, time: ${analysis.estimatedTime}s`);
+
+    const existingRuns = subAgentSystem.listRuns(sessionId);
+    if (existingRuns.length >= 5) {
+      console.log("[AutoSubAgent] Too many active sub-agents, skipping");
+      return;
+    }
+
+    for (const subTask of analysis.subTasks) {
+      const taskDescription = subTask.description || userMessage;
+
+      await subAgentSystem.spawn({
+        task: taskDescription,
+        label: subTask.tool,
+        mode: "run",
+        cleanup: "keep",
+      }, sessionId);
+
+      console.log(`[AutoSubAgent] Spawned sub-agent for: ${taskDescription.substring(0, 50)}...`);
     }
   }
 
