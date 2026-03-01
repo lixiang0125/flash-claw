@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-02
 
-### Heartbeat 心跳系统升级 (2026-03-01)
+### Heartbeat 心跳系统升级 (2026-03-02)
 
 **目的**: 改进心跳系统，使其能真正检测问题并通知用户
 
@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 - 修复任务检查逻辑：检测错 过执行时间的任务
 - 为 FeishuBot 添加 getStatus 方法用于检查连接状态
 
-### 飞书消息确认优化 (2026-03-01)
+### 飞书消息确认优化 (2026-03-02)
 
 **目的**: 改进消息确认体验，使用飞书表情回复替代文本
 
@@ -23,7 +23,7 @@ All notable changes to this project will be documented in this file.
 - 实际回复和错误回复仍使用 LLM 生成，更友好
 - 参考 OpenClaw 实现添加 addReaction 方法
 
-### 飞书 Skills 系统 (2026-03-01)
+### 飞书 Skills 系统 (2026-03-02)
 
 **目的**: 完善 Skill 架构，定义何时使用飞书工具能力
 
