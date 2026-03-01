@@ -411,7 +411,7 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept": "text/markdown, text/plain, */*",
       },
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
     
     if (!response.ok) {
@@ -419,6 +419,14 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
     }
     
     let content = await response.text();
+    
+    if (content.includes("404") || content.includes("Not Found") || content.includes("blocked")) {
+      return { 
+        tool: "WebFetch", 
+        output: "", 
+        error: "无法获取该网页内容。可能原因：1. 网页需要登录权限 2. 网页禁止访问 3. URL无效" 
+      };
+    }
     
     const titleMatch = content.match(/^#\s+(.+)$/m);
     const title = titleMatch ? titleMatch[1].trim() : undefined;
@@ -443,85 +451,6 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
     }
     return { tool: "WebFetch", output: "", error: error.message };
   }
-}
-
-/**
- * 使用 Playwright 渲染页面并提取内容
- */
-async function fetchWithPlaywright(url: string, extractMode: string): Promise<{ text: string; title?: string }> {
-  const { chromium } = require("playwright");
-  
-  const browser = await chromium.launch({ 
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
-  
-  try {
-    const page = await browser.newPage();
-    
-    // 设置视口
-    await page.setViewportSize({ width: 1280, height: 720 });
-    
-    // 访问页面
-    await page.goto(url, { 
-      waitUntil: "networkidle",
-      timeout: 30000 
-    });
-    
-    // 等待内容加载
-    await page.waitForTimeout(2000);
-    
-    // 获取标题
-    const title = await page.title();
-    
-    // 尝试获取主要内容
-    let content = "";
-    
-    // 方法1: 尝试获取 article 或 main 标签
-    const articleContent = await page.$eval("article, main, .article, #article", el => el.innerText).catch(() => null);
-    
-    if (articleContent) {
-      content = articleContent;
-    } else {
-      // 方法2: 获取 body 文本并清理
-      content = await page.evaluate(() => {
-        const body = document.body;
-        // 移除脚本和样式
-        const scripts = body.querySelectorAll("script, style, nav, footer, header, aside");
-        scripts.forEach(el => el.remove());
-        return body.innerText || "";
-      });
-    }
-    
-    await browser.close();
-    
-    return {
-      text: extractMode === "text" ? content : content,
-      title
-    };
-  } catch (error) {
-    await browser.close();
-    throw error;
-  }
-}
-
-/**
- * 简单的 HTML 转文本
- */
-function simpleHtmlToText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
-    .replace(/<[^>]+>/g, "\n")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 /**
