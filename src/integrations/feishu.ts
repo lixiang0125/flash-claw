@@ -134,17 +134,23 @@ export class FeishuBot {
       `Feishu: Processing message from ${senderId?.user_id || senderId?.open_id}: ${text}`
     );
 
-    try {
-      const result = await chatEngine.chat({
-        message: text,
-        sessionId,
-      });
+    // 立即发送收到消息的确认
+    await this.sendMessage(chatId, senderId, "收到！正在处理中... 👀");
 
-      await this.sendMessage(chatId, senderId, result.response);
-    } catch (error) {
-      console.error("Feishu: Chat error:", error);
-      await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
-    }
+    // 后台处理实际请求
+    setTimeout(async () => {
+      try {
+        const result = await chatEngine.chat({
+          message: text,
+          sessionId,
+        });
+
+        await this.sendMessage(chatId, senderId, result.response);
+      } catch (error) {
+        console.error("Feishu: Chat error:", error);
+        await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
+      }
+    }, 100);
   }
 
   private getSessionId(chatId: string, userId?: Lark.ImMessageSenderId): string {

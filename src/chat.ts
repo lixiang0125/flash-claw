@@ -176,7 +176,10 @@ class ChatEngine {
       if (result.error) {
         toolResults.push(`工具执行失败: ${tc.tool} - ${result.error}`);
       } else {
-        toolResults.push(`${tc.tool}: ${JSON.stringify(tc.args)} => ${result.output.slice(0, 200)}`);
+        const output = result.output.length > 10000 
+          ? result.output.substring(0, 10000) + "\n\n[内容过长，已截断...]" 
+          : result.output;
+        toolResults.push(`${tc.tool}: ${JSON.stringify(tc.args)} => ${output}`);
       }
 
       finalResponse = finalResponse.replace(

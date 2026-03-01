@@ -177,5 +177,18 @@
 
 **改造点**:
 - 添加 WebFetch 工具到工具列表
+- 使用 @mozilla/readability + jsdom 提取网页可读内容
+- 支持 markdown 和 text 模式
+- 限制内容长度避免 token 溢出
+
+## 2024-03-01 - 飞书机器人优化
+
+**目的**: 改善用户体验
+
+**改造点**:
+- 收到消息后立即回复 "收到！正在处理中..." 然后后台处理
+- 工具结果截断从 200 字符提升到 10000 字符
+- 安装 @larksuiteoapi/node-sdk, @mozilla/readability, jsdom 依赖
+
 - 支持 fetch URL 并返回内容
 - 限制返回内容长度避免 token 溢出

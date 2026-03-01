@@ -324,12 +324,14 @@ function executeGrep(pattern: string, searchPath?: string): ToolResult {
  * 执行网页抓取
  */
 async function executeWebFetch(url: string, format?: string): Promise<ToolResult> {
-  const responseType = format || "text";
+  const extractMode = format || "markdown";
   
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
       },
     });
     
@@ -337,21 +339,76 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
       return { tool: "WebFetch", output: "", error: `HTTP ${response.status}: ${response.statusText}` };
     }
     
-    let content: string;
-    if (responseType === "markdown" || responseType === "html") {
-      content = await response.text();
+    const contentType = response.headers.get("content-type") || "";
+    const html = await response.text();
+    
+    let text: string;
+    let title: string | undefined;
+    
+    if (contentType.includes("application/json")) {
+      try {
+        const json = JSON.parse(html);
+        text = JSON.stringify(json, null, 2);
+      } catch {
+        text = html;
+      }
     } else {
-      content = await response.text();
+      // 使用 Readability 提取可读内容
+      try {
+        const { JSDOM } = require("jsdom");
+        const { Readability } = require("@mozilla/readability");
+        
+        const dom = new JSDOM(html, { url });
+        const document = dom.window.document;
+        const reader = new Readability(document);
+        const article = reader.parse();
+        
+        if (article) {
+          title = article.title;
+          text = extractMode === "text" ? article.textContent : article.content;
+        } else {
+          // Readability 失败，使用简单提取
+          text = simpleHtmlToText(html);
+        }
+      } catch (e) {
+        // 回退到简单提取
+        text = simpleHtmlToText(html);
+      }
     }
     
-    const truncated = content.length > 50000 
-      ? content.substring(0, 50000) + "\n\n[Content truncated...]" 
-      : content;
+    // 截断内容
+    const maxChars = 30000;
+    const truncated = text.length > maxChars 
+      ? text.substring(0, maxChars) + "\n\n[内容过长，已截断...]" 
+      : text;
     
-    return { tool: "WebFetch", output: `URL: ${url}\n\n${truncated}` };
+    const result = title 
+      ? `标题: ${title}\n\n${truncated}`
+      : truncated;
+    
+    return { tool: "WebFetch", output: `URL: ${url}\n\n${result}` };
   } catch (error: any) {
     return { tool: "WebFetch", output: "", error: error.message };
   }
+}
+
+/**
+ * 简单的 HTML 转文本
+ */
+function simpleHtmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
+    .replace(/<[^>]+>/g, "\n")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**
