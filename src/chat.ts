@@ -166,7 +166,7 @@ class ChatEngine {
 
     const results: ToolResult[] = [];
     let finalResponse = response;
-    const friendlyMessages: string[] = [];
+    const toolResults: string[] = [];
 
     for (const tc of toolCalls) {
       console.log(`Executing tool: ${tc.tool}`, tc.args);
@@ -174,10 +174,9 @@ class ChatEngine {
       results.push(result);
 
       if (result.error) {
-        friendlyMessages.push(`❌ 操作失败: ${result.error}`);
+        toolResults.push(`工具执行失败: ${tc.tool} - ${result.error}`);
       } else {
-        const friendlyMsg = this.getFriendlyMessage(tc.tool, tc.args, result.output);
-        friendlyMessages.push(friendlyMsg);
+        toolResults.push(`${tc.tool}: ${JSON.stringify(tc.args)} => ${result.output.slice(0, 200)}`);
       }
 
       finalResponse = finalResponse.replace(
@@ -186,36 +185,34 @@ class ChatEngine {
       );
     }
 
-    const toolResultText = friendlyMessages.join("\n\n");
     const cleanedResponse = finalResponse.replace(/\[TOOL_RESULT\][\s\S]*?\[\/TOOL_RESULT\]/g, "").trim();
-    
-    if (cleanedResponse) {
-      return { response: `${cleanedResponse}\n\n${toolResultText}`, toolCalls: results };
-    } else {
-      return { response: toolResultText, toolCalls: results };
-    }
+
+    const summaryPrompt = this.buildToolSummaryPrompt(cleanedResponse, toolResults);
+    const summaryResponse = await this.llm.invoke([
+      new HumanMessage(summaryPrompt)
+    ]);
+
+    return { response: summaryResponse.content as string, toolCalls: results };
   }
 
   /**
-   * 根据工具执行结果生成友好消息
+   * 构建工具执行总结的提示
    */
-  private getFriendlyMessage(tool: string, args: Record<string, any>, output: string): string {
-    switch (tool) {
-      case "Write":
-        return `✅ 已创建文件: ${args.filePath}`;
-      case "Read":
-        return `📖 已读取文件: ${args.filePath}`;
-      case "Edit":
-        return `✏️ 已编辑文件: ${args.filePath}`;
-      case "Bash":
-        return `💻 命令已执行`;
-      case "Glob":
-        return `🔍 搜索完成，找到 ${output.split("\n").filter(Boolean).length} 个文件`;
-      case "Grep":
-        return `🔍 搜索完成，找到 ${output.split("\n").filter(Boolean).length} 个匹配`;
-      default:
-        return `✅ 操作完成: ${tool}`;
+  private buildToolSummaryPrompt(originalResponse: string, toolResults: string[]): string {
+    let prompt = "请用自然、友好的语言总结以下工具执行结果，并结合用户的原始请求给出回复。\n\n";
+    
+    if (originalResponse) {
+      prompt += `原始回复:\n${originalResponse}\n\n`;
     }
+    
+    prompt += "工具执行结果:\n";
+    for (const r of toolResults) {
+      prompt += `- ${r}\n`;
+    }
+    
+    prompt += "\n请用中文回复，语气友好自然，像和用户聊天一样。不要提及你是 AI 或模型。";
+    
+    return prompt;
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
