@@ -173,6 +173,28 @@ const WebFetchTool: Tool = {
 };
 
 /**
+ * 互联网搜索工具
+ */
+const WebSearchTool: Tool = {
+  name: "WebSearch",
+  description: "搜索互联网获取信息。用于查询最新资讯、百科知识、新闻等不知道的信息。",
+  parameters: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "搜索关键词",
+      },
+      numResults: {
+        type: "number",
+        description: "返回结果数量，默认5",
+      },
+    },
+    required: ["query"],
+  },
+};
+
+/**
  * 获取用户画像工具
  */
 const GetProfileTool: Tool = {
@@ -220,7 +242,7 @@ const SubAgentTool: Tool = {
   },
 };
 
-export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, GetProfileTool, UpdateProfileTool, SubAgentTool];
+export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, WebSearchTool, GetProfileTool, UpdateProfileTool, SubAgentTool];
 
 /**
  * 执行工具
@@ -245,6 +267,8 @@ export async function executeTool(
         return executeGrep(args.pattern, args.path);
       case "WebFetch":
         return executeWebFetch(args.url, args.format);
+      case "WebSearch":
+        return executeWebSearch(args.query, args.numResults);
       case "GetProfile":
         return executeGetProfile(args.sessionId);
       case "UpdateProfile":
@@ -537,6 +561,98 @@ function simpleHtmlToText(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/**
+ * 执行互联网搜索
+ */
+async function executeWebSearch(query: string, numResults?: number): Promise<ToolResult> {
+  const limit = numResults || 5;
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    const urls = [
+      `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}&c=${limit}`,
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    ];
+    
+    let bestResult = "";
+    
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          },
+          signal: controller.signal,
+        });
+        
+        if (response.ok) {
+          const html = await response.text();
+          const results = parseSearchResults(html, limit);
+          if (results.length > 0) {
+            bestResult = results;
+            break;
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+    
+    clearTimeout(timeoutId);
+    
+    if (!bestResult) {
+      return { 
+        tool: "WebSearch", 
+        output: `搜索"${query}"未找到结果。\n\n提示: 搜索引擎可能暂时不可用，请稍后重试或尝试其他查询。` 
+      };
+    }
+    
+    return { 
+      tool: "WebSearch", 
+      output: `搜索关键词: ${query}\n\n搜索结果:\n${bestResult}` 
+    };
+  } catch (error: any) {
+    if (error.name === "AbortError") {
+      return { tool: "WebSearch", output: "", error: "搜索超时，请稍后重试" };
+    }
+    return { tool: "WebSearch", output: "", error: error.message };
+  }
+}
+
+function parseSearchResults(html: string, limit: number): string {
+  const results: string[] = [];
+  
+  const linkMatches = html.match(/<a[^>]+href="https?:\/\/[^"]+"[^>]*>/gi) || [];
+  const textMatches = html.match(/<td[^>]*>([^<]+)<\/td>/gi) || [];
+  
+  let count = 0;
+  for (let i = 0; i < Math.min(linkMatches.length, 20) && count < limit; i++) {
+    const linkMatch = linkMatches[i].match(/href="([^"]+)"/);
+    const textMatch = textMatches[i]?.replace(/<[^>]+>/g, "").trim();
+    
+    if (linkMatch && textMatch && textMatch.length > 5) {
+      results.push(`${count + 1}. ${textMatch.substring(0, 100)}\n   ${linkMatch[1]}`);
+      count++;
+    }
+  }
+  
+  if (results.length === 0) {
+    const resultLinkMatches = html.match(/<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi);
+    if (resultLinkMatches) {
+      for (let i = 0; i < Math.min(resultLinkMatches.length, limit); i++) {
+        const match = resultLinkMatches[i].match(/href="([^"]*)"[^>]*>([^<]*)<\/a>/);
+        if (match) {
+          results.push(`${i + 1}. ${match[2]}\n   ${match[1]}`);
+        }
+      }
+    }
+  }
+  
+  return results.join("\n\n");
 }
 
 /**
