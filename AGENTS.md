@@ -96,3 +96,25 @@ allowed_tools: Bash,Read,Write,Edit
 - `allowed_tools`: 允许使用的工具列表
 - `disable_user_invocation`: 禁止用户调用
 - `disable_model_invocation`: 禁止模型自动调用
+
+## 工具系统
+
+AI 可使用的工具，定义在 `src/tools/index.ts`。
+
+### 可用工具
+
+| 工具 | 描述 |
+|------|------|
+| Read | 读取文件内容 |
+| Write | 创建或写入文件 |
+| Edit | 编辑文件（字符串替换） |
+| Bash | 执行 shell 命令 |
+| Glob | 搜索匹配模式的文件 |
+| Grep | 在文件中搜索内容 |
+
+### 工具调用格式
+
+AI 在响应中使用以下格式触发工具：
+```
+[TOOL_CALL]<tool_name>:{<args>}[/TOOL_CALL]
+```

@@ -106,3 +106,18 @@
 - 新增示例 Skills:
   - `skills/git-commit/`: Git 提交助手
 - 移除旧的 `skill.json` 文件
+
+## 2024-03-01 - 添加工具执行系统
+
+**目的**: 让 AI 具有实际执行操作的能力，类似 OpenClaw/Claude Code
+
+**改造点**:
+- 创建 `src/tools/index.ts`: 工具定义和执行器
+  - `Read`: 读取文件
+  - `Write`: 写入文件
+  - `Edit`: 编辑文件
+  - `Bash`: 执行 shell 命令
+  - `Glob`: 文件搜索
+  - `Grep`: 内容搜索
+- 修改 `src/chat.ts`: 在 System Prompt 中注入工具说明
+- 前端添加工具调用结果显示
