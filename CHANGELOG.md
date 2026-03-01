@@ -4,84 +4,40 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
-### Added
+### 自迭代机制 (2026-03-01)
 
-- **自迭代机制**: 类似 OpenClaw 的自我改进能力
-  - 工具重试: 失败时自动重试（最多3次），分析错误并修正参数
-  - 质量阈值循环: 工具执行失败后 AI 自我审查
-  - 多轮反馈: 迭代改进直到成功或达到最大迭代次数
-- **CLI 命令行工具**: flashclaw 命令
+**目的**: 类似 OpenClaw 的自我改进能力，让 AI 在工具执行失败时能够自动分析和修复
+
+**改造点**:
+- 创建工具重试机制 (`src/chat/engine.ts`):
+  - 工具执行失败时自动重试（最多3次）
+  - AI 分析错误原因并修正参数
+  - 提供重试提示帮助 AI 理解失败原因
+- 创建质量阈值循环:
+  - 工具执行失败后 AI 进行自我审查
+  - 尝试其他方法完成任务
+- 多轮反馈:
+  - 迭代改进直到所有工具成功或达到最大迭代次数
+- Skill 接口添加 `disable_user_invocation` 和 `disable_model_invocation` 字段
+
+### CLI 命令行工具 (2026-03-01)
+
+**目的**: 提供便捷的命令行操作方式，无需启动服务即可管理任务和 Skills
+
+**改造点**:
+- 创建 `src/cli.ts`: CLI 入口
   - `flashclaw run` 启动服务器
-  - `flashclaw tasks` 任务管理
+  - `flashclaw tasks` 列出所有任务
   - `flashclaw tasks --cleanall` 清除所有任务
-  - `flashclaw skills` 列出 Skills
-
-### Changed
-
-- **对话引擎**: 基于 LangChain + Qwen 的 AI 对话系统
-- **多会话支持**: 通过 sessionId 隔离不同用户的对话
-- **Skill 执行系统**: 支持 Claude Code 标准的 Skill
-  - SKILL.md 格式
-  - scripts/ 目录执行脚本
-  - references/ 参考文档
-- **工具执行系统**: AI 可以实际执行操作
-  - Read/Write/Edit 文件
-  - Bash 命令执行
-  - Glob/Grep 搜索
-  - WebFetch 网页抓取 (使用 Readability + Playwright)
-- **飞书机器人**: WebSocket 长连接模式
-  - 立即回复确认
-  - 自动处理消息
-- **任务系统**: 定时任务调度
-  - cron 表达式支持
-  - 手动触发
-  - 任务历史记录
-  - 支持一次性任务和循环任务
-  - 任务执行后发送到飞书
-- **用户画像 (MEMORY.md)**: 个性化用户信息
-- **Heartbeat 心跳系统**: 定期主动检查任务清单
-  - HEARTBEAT.md 配置
-  - 支持时间窗口
-  - 每 5 分钟检查一次
-- **记忆系统**: USER.md, SOUL.md, MEMORY.md
-  - USER.md: 用户个人信息
-  - SOUL.md: AI 人格定义
-  - MEMORY.md: 长期记忆
-  - 对话中自动更新
-
-### 技术栈
-
-- Runtime: Bun
-- Web: Hono
-- AI: LangChain + Qwen (阿里云百炼)
-- 前端: React + Vite
-- 数据库: bun:sqlite
-- 依赖: cron-parser, @larksuiteoapi/node-sdk, @mozilla/readability, jsdom, playwright
-
-### API 端点
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | / | Health check |
-| GET | /index.html | Frontend |
-| POST | /api/chat | Chat |
-| POST | /api/chat/clear | Clear session |
-| GET | /api/skills | List skills |
-| GET | /api/skills/:name | Get skill |
-| POST | /api/skills/:name/exec | Execute script |
-| GET | /api/tasks | List tasks |
-| POST | /api/tasks | Create task |
-| GET | /api/tasks/:id | Get task |
-| PATCH | /api/tasks/:id | Update task |
-| DELETE | /api/tasks/:id | Delete task |
-| POST | /api/tasks/:id/run | Run task |
-| GET | /api/tasks/:id/runs | Task history |
-| POST | /api/webhooks/feishu | Feishu webhook |
-| GET | /api/webhooks/feishu/status | Feishu status |
+  - `flashclaw tasks --run <id>` 手动触发任务
+  - `flashclaw skills` 列出所有 Skills
+  - `flashclaw skills <name>` 获取指定 Skill 详情
+- `package.json` 添加 bin 入口
+- `README.md` 添加 CLI 使用说明
 
 ---
 
-## 历史记录 (从 memory.md 迁移)
+## 历史记录
 
 ### 初始化对话引擎 (2024-03-01)
 
