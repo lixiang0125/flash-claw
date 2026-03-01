@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### WebSearch 互联网搜索 (2026-03-01)
+
+**目的**: 让 AI 能够搜索互联网获取最新信息
+
+**改造点**:
+- 添加 WebSearch 工具到 `src/tools/index.ts`
+- 使用 Tavily API 进行搜索
+- 需要在 `.env` 中配置 `TAVILY_API_KEY`
+- 返回搜索结果标题、内容摘要和 URL
+
+### LLM 任务解析 (2026-03-01)
+
+**目的**: 使用 LLM 智能解析任务请求，替代正则规则
+
+**改造点**:
+- 创建 `src/chat/llm-parser.ts`: LLM 任务解析器
+- 使用 LLM 分析用户消息中的任务意图
+- 支持更灵活的自然语言任务描述
+- 一次性任务和循环任务智能识别
+
 ### 子智能体自动触发 (2026-03-01)
 
 **目的**: 让系统能够自动检测复杂任务并创建子智能体，无需 AI 主动调用

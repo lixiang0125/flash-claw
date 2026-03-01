@@ -59,6 +59,7 @@ AI 具有实际执行操作的能力，可以在对话中直接操作文件:
 - **Glob**: 文件搜索
 - **Grep**: 内容搜索
 - **WebFetch**: 获取网页内容
+- **WebSearch**: 互联网搜索（使用 Tavily）
 - **GetProfile**: 获取用户画像
 - **UpdateProfile**: 更新用户画像
 - **SubAgent**: 启动子智能体并行处理任务
@@ -78,8 +79,8 @@ AI 具备自我改进能力，类似 OpenClaw:
 
 ### 任务系统
 
-支持定时任务，可以对话创建:
-- "1分钟后提醒我喝水" (一次性任务，执行后自动删除)
+支持定时任务，使用 LLM 智能解析用户请求：
+- "一分钟后提醒我喝水" (一次性任务)
 - "每5分钟提醒我休息" (循环任务)
 - "每天早上8点叫我起床" (循环任务)
 
@@ -266,6 +267,7 @@ flash-claw/
 | FEISHU_WEBHOOK_URL | 飞书 Webhook 地址 |
 | FEISHU_APP_ID | 飞书应用 ID |
 | FEISHU_APP_SECRET | 飞书应用密钥 |
+| TAVILY_API_KEY | Tavily 搜索 API Key |
 
 ## CLI 命令行工具
 
