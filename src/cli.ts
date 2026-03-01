@@ -13,6 +13,9 @@ Flash Claw CLI
   tasks --run <id>      手动触发任务
   skills                列出所有 Skills
   skills <name>         获取指定 Skill 详情
+  subagents             列出所有子智能体
+  subagents <id>        获取子智能体详情
+  subagents --kill <id> 停止子智能体
   help                  显示此帮助信息
 
 示例:
@@ -21,6 +24,8 @@ Flash Claw CLI
   flashclaw tasks --cleanall
   flashclaw tasks --run 1
   flashclaw skills
+  flashclaw subagents
+  flashclaw subagents --kill abc123
 `.trim());
 }
 
@@ -95,6 +100,58 @@ async function cmdSkills(args: string[]) {
   process.exit(0);
 }
 
+async function cmdSubAgents(args: string[]) {
+  const { subAgentSystem } = await import("./subagents/index.js");
+
+  const killIndex = args.indexOf("--kill");
+  if (killIndex !== -1 && args[killIndex + 1]) {
+    const runId = args[killIndex + 1];
+    const success = subAgentSystem.killRun(runId);
+    if (success) {
+      console.log(`子智能体 ${runId} 已停止`);
+    } else {
+      console.error(`子智能体 ${runId} 不存在`);
+    }
+    process.exit(0);
+    return;
+  }
+
+  if (args.length > 0) {
+    const run = subAgentSystem.getRun(args[0]);
+    if (!run) {
+      console.error(`子智能体 ${args[0]} 不存在`);
+      process.exit(1);
+    }
+    console.log(`# 子智能体 ${run.id}`);
+    console.log(`状态: ${run.status}`);
+    console.log(`任务: ${run.task}`);
+    console.log(`开始时间: ${run.startedAt.toISOString()}`);
+    if (run.finishedAt) {
+      console.log(`结束时间: ${run.finishedAt.toISOString()}`);
+    }
+    if (run.result) {
+      console.log(`\n结果:\n${run.result}`);
+    }
+    if (run.error) {
+      console.error(`\n错误: ${run.error}`);
+    }
+    process.exit(0);
+    return;
+  }
+
+  const runs = subAgentSystem.listRuns();
+  if (runs.length === 0) {
+    console.log("暂无子智能体");
+    process.exit(0);
+  }
+
+  console.log("子智能体列表:");
+  for (const run of runs) {
+    console.log(`  ${run.id}: ${run.label || run.task.substring(0, 30)}... [${run.status}]`);
+  }
+  process.exit(0);
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -114,6 +171,9 @@ async function main() {
       break;
     case "skills":
       await cmdSkills(args.slice(1));
+      break;
+    case "subagents":
+      await cmdSubAgents(args.slice(1));
       break;
     default:
       console.error(`未知命令: ${command}`);

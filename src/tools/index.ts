@@ -203,7 +203,24 @@ const UpdateProfileTool: Tool = {
   },
 };
 
-export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, GetProfileTool, UpdateProfileTool];
+/**
+ * 子智能体工具
+ */
+const SubAgentTool: Tool = {
+  name: "SubAgent",
+  description: "启动子智能体执行后台任务。子智能体在独立会话中运行，完成后向主会话报告结果。用于并行化耗时任务。",
+  parameters: {
+    type: "object",
+    properties: {
+      task: { type: "string", description: "子智能体需要完成的任务描述" },
+      label: { type: "string", description: "可选的标签，用于识别子任务" },
+      runTimeoutSeconds: { type: "number", description: "超时时间（秒），默认无超时" },
+    },
+    required: ["task"],
+  },
+};
+
+export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, GetProfileTool, UpdateProfileTool, SubAgentTool];
 
 /**
  * 执行工具
@@ -232,6 +249,8 @@ export async function executeTool(
         return executeGetProfile(args.sessionId);
       case "UpdateProfile":
         return executeUpdateProfile(args.sessionId, args);
+      case "SubAgent":
+        return executeSubAgent(args.task, args.label, args.runTimeoutSeconds);
       default:
         return { tool: toolName, output: "", error: `Unknown tool: ${toolName}` };
     }
@@ -573,4 +592,32 @@ function executeUpdateProfile(sessionId: string | undefined, args: Record<string
   const markdown = userProfileStore.toMarkdown(updated!);
   
   return { tool: "UpdateProfile", output: "用户画像已更新:\n\n" + markdown };
+}
+
+/**
+ * 执行子智能体
+ */
+async function executeSubAgent(task: string, label?: string, runTimeoutSeconds?: number): Promise<ToolResult> {
+  const { subAgentSystem } = await import("../subagents/index.js");
+  
+  try {
+    const result = await subAgentSystem.spawn({
+      task,
+      label,
+      runTimeoutSeconds,
+      mode: "run",
+      cleanup: "keep",
+    }, "main");
+    
+    return {
+      tool: "SubAgent",
+      output: `子智能体已启动\n\n- Run ID: ${result.runId}\n- Session: ${result.childSessionKey}\n- 任务: ${task.substring(0, 100)}${task.length > 100 ? "..." : ""}\n\n子智能体将在后台执行，完成后向主会话报告结果。`,
+    };
+  } catch (error) {
+    return {
+      tool: "SubAgent",
+      output: "",
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
 }

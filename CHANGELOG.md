@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## 2026-03-01
 
+### 子智能体系统 (2026-03-01)
+
+**目的**: 类似 OpenClaw 的 sub-agents 机制，支持 AI 并行处理耗时任务
+
+**改造点**:
+- 创建 `src/subagents/index.ts`: 子智能体管理系统
+  - `spawn()`: 启动子智能体
+  - `getRun()`: 获取子智能体状态
+  - `listRuns()`: 列出所有子智能体
+  - `killRun()`: 停止子智能体
+  - 配置参数: maxConcurrent, maxSpawnDepth, maxChildrenPerAgent
+- 添加 SubAgent 工具到 `src/tools/index.ts`
+  - AI 可以通过 `[TOOL_CALL]` 调用启动子智能体
+  - 子智能体在独立会话中运行，完成后向主会话报告结果
+- CLI 添加子智能体管理命令:
+  - `flashclaw subagents` 列出所有子智能体
+  - `flashclaw subagents <id>` 获取详情
+  - `flashclaw subagents --kill <id>` 停止子智能体
+- `README.md` 更新工具列表和 CLI 说明
+
 ### 自迭代机制 (2026-03-01)
 
 **目的**: 类似 OpenClaw 的自我改进能力，让 AI 在工具执行失败时能够自动分析和修复

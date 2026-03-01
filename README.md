@@ -61,6 +61,7 @@ AI 具有实际执行操作的能力，可以在对话中直接操作文件:
 - **WebFetch**: 获取网页内容
 - **GetProfile**: 获取用户画像
 - **UpdateProfile**: 更新用户画像
+- **SubAgent**: 启动子智能体并行处理任务
 
 AI 使用 `[TOOL_CALL]` 格式触发工具调用，执行后会自动生成友好的回复。
 
@@ -71,6 +72,7 @@ AI 具备自我改进能力，类似 OpenClaw:
 1. **工具重试**: 工具执行失败时自动重试（最多3次），AI 会分析错误原因并修正参数
 2. **质量阈值循环**: 工具执行失败后，AI 会进行自我审查，尝试其他方法完成任务
 3. **多轮反馈**: 通过迭代改进，直到所有工具执行成功或达到最大迭代次数
+4. **子智能体**: AI 可以并行启动子智能体处理耗时任务，完成后向主会话报告结果
 
 ### 任务系统
 
@@ -274,6 +276,9 @@ flashclaw tasks --cleanall      # 清除所有任务
 flashclaw tasks --run <id>      # 手动触发任务
 flashclaw skills                # 列出所有 Skills
 flashclaw skills <name>         # 获取指定 Skill 详情
+flashclaw subagents             # 列出所有子智能体
+flashclaw subagents <id>        # 获取子智能体详情
+flashclaw subagents --kill <id> # 停止子智能体
 flashclaw help                  # 显示帮助信息
 ```
 
