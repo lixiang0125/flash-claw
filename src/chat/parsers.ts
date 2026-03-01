@@ -1,63 +1,110 @@
 import type { Skill } from "../skills";
 
 /**
+ * 任务解析结果
+ */
+export interface ParsedTask {
+  name: string;
+  message: string;
+  schedule?: string;      // cron 表达式（循环任务）
+  executeAfter?: number; // 毫秒（一次性任务）
+  type: "once" | "recurring";
+}
+
+/**
  * 解析用户消息中的任务创建请求
  */
-export function parseTaskFromMessage(message: string): { name: string; message: string; schedule: string } | null {
+export function parseTaskFromMessage(message: string): ParsedTask | null {
   const lowerMessage = message.toLowerCase();
   
   const minuteMatch = message.match(/(\d+)\s*分钟/);
   const hourMatch = message.match(/(\d+)\s*小时/);
   const dayMatch = message.match(/(\d+)\s*天/);
   
-  let cronExpression = "";
-  let taskName = "";
-  
+  // 一次性任务：X分钟后/小时后/天后（不带"每"字）
   if (minuteMatch) {
     const minutes = parseInt(minuteMatch[1]);
-    // cron-parser doesn't support */X, convert to * with appropriate range
-    cronExpression = `*/${minutes} * * * *`;
-    // For cron-parser, we need to use a workaround for intervals
-    if (minutes > 1) {
-      cronExpression = `*/${minutes} * * * *`;
-    } else {
-      cronExpression = `* * * * *`; // every minute
-    }
-    taskName = `${minutes}分钟后提醒`;
-  } else if (hourMatch) {
+    const executeAfter = minutes * 60 * 1000; // 转换为毫秒
+    return {
+      name: `${minutes}分钟后提醒`,
+      message: extractTaskContent(message),
+      executeAfter,
+      type: "once",
+    };
+  }
+  
+  if (hourMatch) {
     const hours = parseInt(hourMatch[1]);
-    cronExpression = `0 */${hours} * * *`;
-    taskName = `${hours}小时后提醒`;
-  } else if (dayMatch) {
+    const executeAfter = hours * 60 * 60 * 1000;
+    return {
+      name: `${hours}小时后提醒`,
+      message: extractTaskContent(message),
+      executeAfter,
+      type: "once",
+    };
+  }
+  
+  if (dayMatch) {
     const days = parseInt(dayMatch[1]);
-    cronExpression = `0 0 */${days} * *`;
-    taskName = `${days}天后提醒`;
-  } else if (lowerMessage.includes("每") || lowerMessage.includes("循环") || lowerMessage.includes("定时")) {
+    const executeAfter = days * 24 * 60 * 60 * 1000;
+    return {
+      name: `${days}天后提醒`,
+      message: extractTaskContent(message),
+      executeAfter,
+      type: "once",
+    };
+  }
+  
+  // 循环任务：每X分钟/每小时/每天
+  if (lowerMessage.includes("每")) {
+    const everyMinuteMatch = message.match(/每\s*(\d+)\s*分钟/);
     const everyHourMatch = message.match(/每\s*(\d+)\s*小时/);
+    
+    if (everyMinuteMatch) {
+      const minutes = parseInt(everyMinuteMatch[1]);
+      return {
+        name: `每${minutes}分钟提醒`,
+        message: extractTaskContent(message),
+        schedule: `*/${minutes} * * * *`,
+        type: "recurring",
+      };
+    }
+    
     if (everyHourMatch) {
-      cronExpression = `0 */${everyHourMatch[1]} * * *`;
-      taskName = `每${everyHourMatch[1]}小时任务`;
+      const hours = parseInt(everyHourMatch[1]);
+      return {
+        name: `每${hours}小时提醒`,
+        message: extractTaskContent(message),
+        schedule: `0 */${hours} * * *`,
+        type: "recurring",
+      };
+    }
+    
+    if (lowerMessage.includes("每天") || lowerMessage.includes("每天早上") || lowerMessage.includes("每天晚上")) {
+      const hourMatch2 = message.match(/(?:早上|晚上|上午|下午)?\s*(\d{1,2})\s*点/);
+      const hour = hourMatch2 ? parseInt(hourMatch2[1]) : 8;
+      return {
+        name: `每天${hour}点提醒`,
+        message: extractTaskContent(message),
+        schedule: `0 ${hour} * * *`,
+        type: "recurring",
+      };
     }
   }
   
-  if (!cronExpression) return null;
-  
-  let taskMessage = message
+  return null;
+}
+
+/**
+ * 从消息中提取任务内容
+ */
+function extractTaskContent(message: string): string {
+  return message
     .replace(/(\d+)\s*分钟/g, "")
     .replace(/(\d+)\s*小时/g, "")
     .replace(/(\d+)\s*天/g, "")
     .replace(/每|循环|定时|提醒|后|给我|发|条|消息/g, "")
-    .trim();
-  
-  if (!taskMessage) {
-    taskMessage = "提醒消息";
-  }
-  
-  return {
-    name: taskName || "定时任务",
-    message: taskMessage,
-    schedule: cronExpression
-  };
+    .trim() || "提醒消息";
 }
 
 /**

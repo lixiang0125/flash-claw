@@ -24,6 +24,8 @@ All notable changes to this project will be documented in this file.
   - cron 表达式支持
   - 手动触发
   - 任务历史记录
+  - 支持一次性任务和循环任务
+  - 任务执行后发送到飞书
 - **用户画像 (MEMORY.md)**: 个性化用户信息
 - **Heartbeat 心跳系统**: 定期主动检查任务清单
   - HEARTBEAT.md 配置

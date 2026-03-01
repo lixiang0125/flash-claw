@@ -22,7 +22,12 @@
 
 ## 代码变更流程
 
-每次代码变更后运行：
+每次代码变更后：
+1. 更新 README.md 说明新功能
+2. 更新 CHANGELOG.md 记录变更
+3. 运行 `git add -A && git commit -m "..." && git push`
+
+或者运行：
 ```bash
 bun run release
 ```
@@ -31,6 +36,12 @@ bun run release
 1. 生成 CHANGELOG.md 记录变更
 2. 自动 git commit
 3. 推送到远端
+
+## 重要规则
+
+- 每次代码变更后必须更新 README.md 和 CHANGELOG.md
+- 每次代码变更后必须推送到远端
+- 隐私文件（MEMORY.md, USER.md, SOUL.md, data/）不提交到远端
 
 ## 对话引擎
 

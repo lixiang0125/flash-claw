@@ -27,6 +27,8 @@ data/
 
 # personal memory files (privacy - local only)
 MEMORY.md
+USER.md
+SOUL.md
 
 # caches
 .eslintcache

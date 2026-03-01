@@ -1,5 +1,6 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { chatEngine } from "../chat";
+import { taskScheduler } from "../tasks";
 
 export interface FeishuConfig {
   appId?: string;
@@ -129,6 +130,9 @@ export class FeishuBot {
     const senderId = message.sender?.sender_id;
     const chatId = message.chat_id;
     const sessionId = this.getSessionId(chatId, senderId);
+
+    // 记录聊天 ID，用于任务提醒
+    taskScheduler.setLastChatId(chatId);
 
     console.log(
       `Feishu: Processing message from ${senderId?.user_id || senderId?.open_id}: ${text}`

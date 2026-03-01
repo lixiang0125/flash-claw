@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { CronExpressionParser } from "cron-parser";
 import path from "path";
 import { chatEngine } from "../chat";
+import { feishuBot } from "../integrations/feishu";
 
 export interface Task {
   id: string;
@@ -27,6 +28,21 @@ export interface TaskRun {
 class TaskScheduler {
   private db: ReturnType<Database>;
   private timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private lastChatId: string | null = null;
+
+  /**
+   * 设置最后活跃的飞书聊天 ID
+   */
+  setLastChatId(chatId: string): void {
+    this.lastChatId = chatId;
+  }
+
+  /**
+   * 获取最后活跃的飞书聊天 ID
+   */
+  getLastChatId(): string | null {
+    return this.lastChatId;
+  }
   private isRunning: boolean = false;
 
   constructor() {
@@ -90,6 +106,35 @@ class TaskScheduler {
       ...task,
       createdAt: now,
       nextRun
+    };
+  }
+
+  /**
+   * 创建一次性任务
+   */
+  createOneTimeTask(task: { name: string; message: string; executeAfter: number }): Task {
+    const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const executeAt = new Date(Date.now() + task.executeAfter).toISOString();
+    const now = new Date().toISOString();
+    
+    this.db.prepare(`
+      INSERT INTO tasks (id, name, message, schedule, enabled, next_run, created_at)
+      VALUES (?, ?, ?, 'once', ?, ?, ?)
+    `).run(id, task.name, task.message, 1, executeAt, now);
+    
+    // 立即调度
+    setTimeout(() => {
+      this.executeTask(id);
+    }, task.executeAfter);
+    
+    return {
+      id,
+      name: task.name,
+      message: task.message,
+      schedule: "once",
+      enabled: true,
+      nextRun: executeAt,
+      createdAt: now
     };
   }
 
@@ -169,17 +214,34 @@ class TaskScheduler {
         sessionId: `task_${id}`,
       });
 
-      const nextRun = this.calculateNextRun(task.schedule);
       const finishedAt = new Date().toISOString();
 
-      this.db.prepare(`
-        UPDATE tasks SET last_run = ?, next_run = ? WHERE id = ?
-      `).run(now, nextRun, id);
+      // 一次性任务执行后删除
+      if (task.schedule === "once") {
+        this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+      } else {
+        const nextRun = this.calculateNextRun(task.schedule);
+        this.db.prepare(`
+          UPDATE tasks SET last_run = ?, next_run = ? WHERE id = ?
+        `).run(now, nextRun, id);
+      }
 
       this.db.prepare(`
         UPDATE task_runs SET status = 'success', output = ?, finished_at = ?
         WHERE id = ?
       `).run(result.response, finishedAt, runId);
+
+      // 发送任务结果到飞书（如果有飞书配置）
+      if (feishuBot.isConfigured()) {
+        try {
+          const lastChatId = this.getLastChatId();
+          if (lastChatId) {
+            await feishuBot.sendMessage(lastChatId, undefined, `⏰ 任务提醒: ${result.response}`);
+          }
+        } catch (e) {
+          console.error("[TaskScheduler] Failed to send to Feishu:", e);
+        }
+      }
 
       if (task.enabled) {
         this.cancelTask(id);

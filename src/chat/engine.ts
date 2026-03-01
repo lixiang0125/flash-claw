@@ -174,21 +174,43 @@ class ChatEngine {
     const taskInfo = parseTaskFromMessage(request.message);
     if (taskInfo) {
       try {
-        const task = taskScheduler.createTask({
-          name: taskInfo.name,
-          message: taskInfo.message,
-          schedule: taskInfo.schedule,
-          enabled: true,
-        });
+        let taskPrompt: string;
         
-        const scheduleText = cronToHumanReadable(taskInfo.schedule);
-        
-        const taskPrompt = `用户请求创建定时任务。
+        if (taskInfo.type === "once") {
+          // 一次性任务：立即调度，到期后自动删除
+          const task = taskScheduler.createOneTimeTask({
+            name: taskInfo.name,
+            message: taskInfo.message,
+            executeAfter: taskInfo.executeAfter!,
+          });
+          
+          const minutes = Math.round(taskInfo.executeAfter! / 60000);
+          const timeText = minutes >= 60 ? `${Math.round(minutes / 60)}小时` : `${minutes}分钟`;
+          
+          taskPrompt = `用户请求创建一个一次性任务。
+任务名称: ${task.name}
+任务内容: ${taskInfo.message}
+将在: ${timeText}后执行
+
+请用友好、自然的方式告诉用户任务已创建。用中文回复。`;
+        } else {
+          // 循环任务
+          const task = taskScheduler.createTask({
+            name: taskInfo.name,
+            message: taskInfo.message,
+            schedule: taskInfo.schedule!,
+            enabled: true,
+          });
+          
+          const scheduleText = cronToHumanReadable(taskInfo.schedule!);
+          
+          taskPrompt = `用户请求创建定时任务。
 任务名称: ${task.name}
 任务内容: ${taskInfo.message}
 执行计划: ${scheduleText}
 
 请用友好、自然的方式告诉用户任务已创建。不要提及任务 ID。用中文回复。`;
+        }
         
         const llmResponse = await this.llm.invoke([new HumanMessage(taskPrompt)]);
         
