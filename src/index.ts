@@ -5,6 +5,7 @@ import { chatEngine, type ChatRequest } from "./chat";
 import { listSkills, searchSkills, getSkill, executeScript } from "./skills";
 import { feishuBot } from "./integrations/feishu";
 import { taskScheduler } from "./tasks";
+import { heartbeatSystem } from "./heartbeat";
 
 const app = new Hono();
 
@@ -191,6 +192,46 @@ app.get("/api/tasks/:id/runs", (c) => {
   const id = c.req.param("id");
   const runs = taskScheduler.getTaskRuns(id);
   return c.json({ runs });
+});
+
+/**
+ * Heartbeat API
+ */
+app.get("/api/heartbeat/status", (c) => {
+  return c.json(heartbeatSystem.getStatus());
+});
+
+app.post("/api/heartbeat/trigger", async (c) => {
+  try {
+    const results = await heartbeatSystem.trigger();
+    return c.json({ results });
+  } catch (error: any) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+app.get("/api/heartbeat/file", (c) => {
+  const fs = require("fs");
+  const path = require("path");
+  const heartbeatFile = path.join(process.cwd(), "HEARTBEAT.md");
+  
+  if (!fs.existsSync(heartbeatFile)) {
+    heartbeatSystem.getHeartbeatFile();
+  }
+  
+  const content = fs.readFileSync(heartbeatFile, "utf-8");
+  return c.json({ content });
+});
+
+app.post("/api/heartbeat/file", async (c) => {
+  const fs = require("fs");
+  const path = require("path");
+  const { content } = await c.req.json<{ content: string }>();
+  
+  const heartbeatFile = path.join(process.cwd(), "HEARTBEAT.md");
+  fs.writeFileSync(heartbeatFile, content, "utf-8");
+  
+  return c.json({ success: true });
 });
 
 export default {

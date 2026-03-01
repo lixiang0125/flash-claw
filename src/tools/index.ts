@@ -574,6 +574,3 @@ function executeUpdateProfile(sessionId: string | undefined, args: Record<string
   
   return { tool: "UpdateProfile", output: "用户画像已更新:\n\n" + markdown };
 }
-    parameters: tool.parameters,
-  }));
-}
