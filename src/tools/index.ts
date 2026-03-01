@@ -403,76 +403,34 @@ function executeGrep(pattern: string, searchPath?: string): ToolResult {
  * 执行网页抓取
  */
 async function executeWebFetch(url: string, format?: string): Promise<ToolResult> {
-  const extractMode = format || "markdown";
-  
   try {
-    // 先尝试简单 fetch
-    const response = await fetch(url, {
+    const jinaUrl = `https://r.jina.ai/${url}`;
+    
+    const response = await fetch(jinaUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "text/markdown, text/plain, */*",
       },
+      signal: AbortSignal.timeout(30000),
     });
     
     if (!response.ok) {
       return { tool: "WebFetch", output: "", error: `HTTP ${response.status}: ${response.statusText}` };
     }
     
-    const contentType = response.headers.get("content-type") || "";
-    const html = await response.text();
+    let content = await response.text();
     
-    let text: string;
-    let title: string | undefined;
+    const titleMatch = content.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : undefined;
     
-    if (contentType.includes("application/json")) {
-      try {
-        const json = JSON.parse(html);
-        text = JSON.stringify(json, null, 2);
-      } catch {
-        text = html;
-      }
-    } else {
-      // 使用 Readability 提取可读内容
-      try {
-        const { JSDOM } = require("jsdom");
-        const { Readability } = require("@mozilla/readability");
-        
-        const dom = new JSDOM(html, { url });
-        const document = dom.window.document;
-        const reader = new Readability(document);
-        const article = reader.parse();
-        
-        if (article) {
-          title = article.title;
-          text = extractMode === "text" ? article.textContent : article.content;
-        } else {
-          text = simpleHtmlToText(html);
-        }
-      } catch (e) {
-        text = simpleHtmlToText(html);
-      }
+    if (title && content.startsWith(`# ${title}`)) {
+      content = content.replace(/^#\s+.+$/m, "").trim();
     }
     
-    // 如果内容太短，尝试使用 Playwright 渲染
-    if (text.length < 500) {
-      console.log(`WebFetch: Content too short (${text.length} chars), trying Playwright...`);
-      try {
-        const playwrightResult = await fetchWithPlaywright(url, extractMode);
-        if (playwrightResult.text.length > text.length) {
-          text = playwrightResult.text;
-          title = title || playwrightResult.title;
-        }
-      } catch (e) {
-        console.error("WebFetch: Playwright failed:", e);
-      }
-    }
-    
-    // 截断内容
     const maxChars = 30000;
-    const truncated = text.length > maxChars 
-      ? text.substring(0, maxChars) + "\n\n[内容过长，已截断...]" 
-      : text;
+    const truncated = content.length > maxChars 
+      ? content.substring(0, maxChars) + "\n\n[内容过长，已截断...]" 
+      : content;
     
     const result = title 
       ? `标题: ${title}\n\n${truncated}`
@@ -480,6 +438,9 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
     
     return { tool: "WebFetch", output: `URL: ${url}\n\n${result}` };
   } catch (error: any) {
+    if (error.name === "AbortError") {
+      return { tool: "WebFetch", output: "", error: "获取页面超时，请稍后重试" };
+    }
     return { tool: "WebFetch", output: "", error: error.message };
   }
 }
