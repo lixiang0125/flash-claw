@@ -166,18 +166,56 @@ class ChatEngine {
 
     const results: ToolResult[] = [];
     let finalResponse = response;
+    const friendlyMessages: string[] = [];
 
     for (const tc of toolCalls) {
       console.log(`Executing tool: ${tc.tool}`, tc.args);
       const result = await executeTool(tc.tool, tc.args);
       results.push(result);
+
+      if (result.error) {
+        friendlyMessages.push(`❌ 操作失败: ${result.error}`);
+      } else {
+        const friendlyMsg = this.getFriendlyMessage(tc.tool, tc.args, result.output);
+        friendlyMessages.push(friendlyMsg);
+      }
+
       finalResponse = finalResponse.replace(
         /\[TOOL_CALL\][\s\S]*?\[\/TOOL_CALL\]/,
-        `[TOOL_RESULT]${result.error ? `Error: ${result.error}\n` : result.output}[/TOOL_RESULT]`
+        ""
       );
     }
 
-    return { response: finalResponse, toolCalls: results };
+    const toolResultText = friendlyMessages.join("\n\n");
+    const cleanedResponse = finalResponse.replace(/\[TOOL_RESULT\][\s\S]*?\[\/TOOL_RESULT\]/g, "").trim();
+    
+    if (cleanedResponse) {
+      return { response: `${cleanedResponse}\n\n${toolResultText}`, toolCalls: results };
+    } else {
+      return { response: toolResultText, toolCalls: results };
+    }
+  }
+
+  /**
+   * 根据工具执行结果生成友好消息
+   */
+  private getFriendlyMessage(tool: string, args: Record<string, any>, output: string): string {
+    switch (tool) {
+      case "Write":
+        return `✅ 已创建文件: ${args.filePath}`;
+      case "Read":
+        return `📖 已读取文件: ${args.filePath}`;
+      case "Edit":
+        return `✏️ 已编辑文件: ${args.filePath}`;
+      case "Bash":
+        return `💻 命令已执行`;
+      case "Glob":
+        return `🔍 搜索完成，找到 ${output.split("\n").filter(Boolean).length} 个文件`;
+      case "Grep":
+        return `🔍 搜索完成，找到 ${output.split("\n").filter(Boolean).length} 个匹配`;
+      default:
+        return `✅ 操作完成: ${tool}`;
+    }
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {

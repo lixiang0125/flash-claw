@@ -44,7 +44,11 @@ async function main() {
   try {
     execSync("git add -A");
     execSync('git commit -m "chore: update changelog"');
+    console.log("Committed successfully");
+    
     execSync("git push");
+    console.log("Pushed successfully");
+    
     console.log("Changelog generated, committed and pushed successfully");
   } catch (e) {
     console.error("Git error:", e);
