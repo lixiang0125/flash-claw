@@ -143,6 +143,16 @@
   - 支持两种接入方式: Webhook (简单) 和 App API (完整)
   - Webhook 模式: 接收消息并回复
   - App API 模式: 支持更多功能 (卡片消息、@机器人等)
+
+## 2024-03-01 - 飞书长连接支持
+
+**目的**: 使用 WebSocket 长连接方式接入飞书机器人
+
+**改造点**:
+- 安装 `@larksuiteoapi/node-sdk` 依赖
+- 使用 `WSClient` 建立 WebSocket 长连接
+- 简化代码，移除 Webhook 依赖
+- 更新 README 接入指南
 - 添加 API 端点:
   - `POST /api/webhooks/feishu`: 飞书 Webhook 接收地址
   - `GET /api/webhooks/feishu/status`: 配置检查
