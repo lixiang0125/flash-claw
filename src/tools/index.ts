@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
+import { userProfileStore } from "../profiles";
 
 export interface Tool {
   name: string;
@@ -171,7 +172,38 @@ const WebFetchTool: Tool = {
   },
 };
 
-export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool];
+/**
+ * 获取用户画像工具
+ */
+const GetProfileTool: Tool = {
+  name: "GetProfile",
+  description: "获取当前用户的画像信息，包括名字、邮箱、公司、职位、偏好等。",
+  parameters: {
+    type: "object",
+    properties: {},
+  },
+};
+
+/**
+ * 更新用户画像工具
+ */
+const UpdateProfileTool: Tool = {
+  name: "UpdateProfile",
+  description: "更新用户画像信息。当用户告诉你他们的信息时（如名字、公司、偏好等），使用此工具保存。",
+  parameters: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "用户名字" },
+      email: { type: "string", description: "邮箱" },
+      company: { type: "string", description: "公司" },
+      role: { type: "string", description: "职位" },
+      bio: { type: "string", description: "个人简介" },
+      preference: { type: "string", description: "偏好设置，格式: key:value" },
+    },
+  },
+};
+
+export const TOOLS: Tool[] = [ReadTool, WriteTool, EditTool, BashTool, GlobTool, GrepTool, WebFetchTool, GetProfileTool, UpdateProfileTool];
 
 /**
  * 执行工具
@@ -196,6 +228,10 @@ export async function executeTool(
         return executeGrep(args.pattern, args.path);
       case "WebFetch":
         return executeWebFetch(args.url, args.format);
+      case "GetProfile":
+        return executeGetProfile(args.sessionId);
+      case "UpdateProfile":
+        return executeUpdateProfile(args.sessionId, args);
       default:
         return { tool: toolName, output: "", error: `Unknown tool: ${toolName}` };
     }
@@ -491,6 +527,53 @@ export function getToolsForAI(): { name: string; description: string; parameters
   return TOOLS.map(tool => ({
     name: tool.name,
     description: tool.description,
+    parameters: tool.parameters,
+  }));
+}
+
+/**
+ * 执行获取用户画像
+ */
+function executeGetProfile(sessionId?: string): ToolResult {
+  const sid = sessionId || "default";
+  const profile = userProfileStore.get(sid);
+  
+  if (!profile) {
+    return { tool: "GetProfile", output: "暂无用户信息" };
+  }
+  
+  const markdown = userProfileStore.toMarkdown(profile);
+  return { tool: "GetProfile", output: markdown };
+}
+
+/**
+ * 执行更新用户画像
+ */
+function executeUpdateProfile(sessionId: string | undefined, args: Record<string, any>): ToolResult {
+  const sid = sessionId || "default";
+  
+  const updates: any = {};
+  
+  if (args.name) updates.name = args.name;
+  if (args.email) updates.email = args.email;
+  if (args.company) updates.company = args.company;
+  if (args.role) updates.role = args.role;
+  if (args.bio) updates.bio = args.bio;
+  
+  const profile = userProfileStore.update(sid, updates);
+  
+  if (args.preference && profile) {
+    const [key, value] = args.preference.split(":");
+    if (key && value) {
+      userProfileStore.appendPreference(sid, key.trim(), value.trim());
+    }
+  }
+  
+  const updated = userProfileStore.get(sid);
+  const markdown = userProfileStore.toMarkdown(updated!);
+  
+  return { tool: "UpdateProfile", output: "用户画像已更新:\n\n" + markdown };
+}
     parameters: tool.parameters,
   }));
 }
