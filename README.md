@@ -1,6 +1,6 @@
 # Flash Claw
 
-基于 Hono + Bun + LangChain 的 AI 对话引擎，支持 Skill 执行系统。
+基于 Hono + Bun + LangChain 的 AI 对话引擎，支持 Skill 执行系统和工具执行能力。
 
 ## 技术栈
 
@@ -42,6 +42,35 @@ bun run start      # 启动服务
 
 服务启动后访问 http://localhost:3000
 
+## 功能特性
+
+### AI 对话
+
+支持多会话管理，通过 sessionId 隔离不同用户的对话上下文。
+
+### 工具执行
+
+AI 具有实际执行操作的能力，可以在对话中直接操作文件:
+
+- **Read**: 读取文件内容
+- **Write**: 创建或写入文件
+- **Edit**: 编辑文件
+- **Bash**: 执行 shell 命令
+- **Glob**: 文件搜索
+- **Grep**: 内容搜索
+
+AI 使用 `[TOOL_CALL]` 格式触发工具调用，执行后会自动生成友好的回复。
+
+### Skill 系统
+
+符合 Claude Code Agent Skills 标准，可加载预设的技能增强 AI 能力。
+
+### 飞书集成
+
+支持接入飞书机器人，可在飞书中与 AI 对话。两种接入方式:
+- Webhook: 简单快速
+- App API: 完整功能
+
 ## API 接口
 
 | 方法 | 路径 | 描述 |
@@ -53,6 +82,8 @@ bun run start      # 启动服务
 | GET | /api/skills | 列出所有 Skills |
 | GET | /api/skills/:name | 获取指定 Skill |
 | POST | /api/skills/:name/exec | 执行 Skill 脚本 |
+| POST | /api/webhooks/feishu | 飞书 Webhook |
+| GET | /api/webhooks/feishu/status | 飞书配置状态 |
 
 ### 对话接口
 
@@ -121,22 +152,36 @@ allowed_tools: Bash,Read,Write,Edit
 ```
 flash-claw/
 ├── src/
-│   ├── index.ts      # Hono 服务入口
-│   ├── chat.ts       # 对话引擎核心
-│   └── skills/       # Skill 加载模块
-├── src/web/         # React 前端
-│   ├── components/  # UI 组件
-│   ├── hooks/       # 业务逻辑
-│   └── api/         # API 服务
-├── .flashclaw/skills/  # Skills 目录
+│   ├── index.ts          # Hono 服务入口
+│   ├── chat.ts           # 对话引擎核心
+│   ├── skills/           # Skill 加载模块
+│   ├── tools/            # 工具定义和执行器
+│   └── integrations/
+│       └── feishu.ts     # 飞书机器人集成
+├── src/web/              # React 前端
+│   ├── components/       # UI 组件
+│   ├── hooks/            # 业务逻辑
+│   └── api/              # API 服务
+├── .flashclaw/skills/    # Skills 目录
 ├── scripts/
-│   ├── release.ts   # 自动发布脚本
-│   └── build-web.ts # 前端构建脚本
-├── .env             # 环境变量 (不提交)
-├── .env.example     # 环境变量模板
-├── vite.config.mts  # Vite 配置
+│   ├── release.ts        # 自动发布脚本
+│   └── build-web.ts      # 前端构建脚本
+├── .env                  # 环境变量 (不提交)
+├── .env.example          # 环境变量模板
+├── vite.config.mts       # Vite 配置
 └── package.json
 ```
+
+## 环境变量
+
+| 变量 | 描述 |
+|------|------|
+| OPENAI_API_KEY | API 密钥 |
+| OPENAI_BASE_URL | API 端点地址 |
+| MODEL | 模型名称 |
+| FEISHU_WEBHOOK_URL | 飞书 Webhook 地址 |
+| FEISHU_APP_ID | 飞书应用 ID |
+| FEISHU_APP_SECRET | 飞书应用密钥 |
 
 ## 发布
 
