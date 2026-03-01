@@ -177,8 +177,17 @@ class ChatEngine {
         
         const scheduleText = cronToHumanReadable(taskInfo.schedule);
         
+        const taskPrompt = `用户请求创建定时任务。
+任务名称: ${task.name}
+任务内容: ${taskInfo.message}
+执行计划: ${scheduleText}
+
+请用友好、自然的方式告诉用户任务已创建。不要提及任务 ID。用中文回复。`;
+        
+        const llmResponse = await this.llm.invoke([new HumanMessage(taskPrompt)]);
+        
         return {
-          response: `好的！我已经创建了定时任务「${task.name}」，将在 ${scheduleText} 执行。\n\n任务 ID: ${task.id}\n\n你可以说"取消任务"来删除它。`,
+          response: llmResponse.content as string,
           sessionId,
         };
       } catch (error: unknown) {

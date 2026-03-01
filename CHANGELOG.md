@@ -25,6 +25,10 @@ All notable changes to this project will be documented in this file.
   - 手动触发
   - 任务历史记录
 - **用户画像 (MEMORY.md)**: 个性化用户信息
+- **Heartbeat 心跳系统**: 定期主动检查任务清单
+  - HEARTBEAT.md 配置
+  - 支持时间窗口
+  - 每 5 分钟检查一次
 
 ### 技术栈
 
