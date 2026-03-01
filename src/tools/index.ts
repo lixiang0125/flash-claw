@@ -415,24 +415,35 @@ async function executeWebFetch(url: string, format?: string): Promise<ToolResult
     });
     
     if (!response.ok) {
-      return { tool: "WebFetch", output: "", error: `HTTP ${response.status}: ${response.statusText}` };
+      return { 
+        tool: "WebFetch", 
+        output: "", 
+        error: `获取失败: ${response.status}` 
+      };
     }
     
     let content = await response.text();
     
-    if (content.includes("404") || content.includes("Not Found") || content.includes("blocked")) {
+    // 清洗 Jina 返回的内容
+    content = content.replace(/^.*?=== Start of Content ===\n?/, '');
+    content = content.replace(/\n?=== End of Content ===.*?$/, '');
+    content = content.replace(/^.*?We couldn't extract content from this URL.*$/gm, '');
+    content = content.replace(/^.*?blocked.*$/gi, '');
+    content = content.trim();
+    
+    if (!content || content.length < 50) {
       return { 
         tool: "WebFetch", 
         output: "", 
-        error: "无法获取该网页内容。可能原因：1. 网页需要登录权限 2. 网页禁止访问 3. URL无效" 
+        error: "无法提取网页内容，可能需要登录或网页禁止访问" 
       };
     }
     
     const titleMatch = content.match(/^#\s+(.+)$/m);
-    const title = titleMatch ? titleMatch[1].trim() : undefined;
+    const title = titleMatch?.[1]?.trim();
     
     if (title && content.startsWith(`# ${title}`)) {
-      content = content.replace(/^#\s+.+$/m, "").trim();
+      content = content.replace(/^#\s+.+$/m, '').trim();
     }
     
     const maxChars = 30000;
