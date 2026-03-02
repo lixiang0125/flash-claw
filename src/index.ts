@@ -85,7 +85,9 @@ const qwenTools = toQwenTools(toolRegistry.getAll());
 console.log("[DEBUG] Qwen tools:", JSON.stringify(qwenTools).substring(0, 500));
 chatEngine.setTools(qwenTools as any);
 chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
+  console.log(`[TOOL_CALL] ${name}`, JSON.stringify(args).substring(0, 200));
   const result = await toolExecutor.execute(name, args, sessionId);
+  console.log(`[TOOL_RESULT] ${name}:`, result.success ? "OK" : result.error);
   return { result: result.data, error: result.error || undefined };
 });
 

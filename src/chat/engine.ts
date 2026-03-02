@@ -39,8 +39,8 @@ class ChatEngine {
     });
   }
 
-  setTools(tools: Map<string, unknown>): void {
-    this.tools = tools;
+  setTools(tools: unknown): void {
+    this.tools = tools as any;
   }
 
   setToolExecutor(executor: (name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>): void {
@@ -69,9 +69,9 @@ class ChatEngine {
       while (iterations < MAX_STEPS) {
         iterations++;
 
-        const aiTools = this.tools.size > 0 ? Object.fromEntries(this.tools) : undefined;
+        const aiTools = Array.isArray(this.tools) && this.tools.length > 0 ? this.tools : undefined;
         
-        console.log("[DEBUG] tools:", aiTools ? Object.keys(aiTools) : "none");
+        console.log("[DEBUG] tools:", aiTools ? `(${aiTools.length} tools)` : "none");
 
         const result = await generateText({
           model: this.model.chatModel(process.env.MODEL || "qwen-plus"),

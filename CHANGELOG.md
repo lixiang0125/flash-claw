@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-### Phase 2 - 工具与执行层 (2026-03-02)
+### Phase 2 - 工具与执行层 (2026-03-03)
 
 **改造点**:
 - ToolRegistry 工具注册中心
@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - SecurityLayer 安全层（路径白名单、命令黑名单、限流、审计）
 - 8 个内置工具: read_file, write_file, edit_file, bash, glob, grep, web_fetch, web_search
 - WebFetch 升级: SSRF 防护 + Playwright 回退 + 缓存
+- Chat Engine 重构: 使用 Vercel AI SDK + Qwen Function Calling
 
 ### LLM Service 切换到 Vercel AI SDK (2026-03-02)
 
