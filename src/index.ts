@@ -49,14 +49,25 @@ const toolExecutor = new ToolExecutor(
   logger,
 );
 
+import { zodToJsonSchema } from "zod-to-json-schema";
+
 function toQwenTools(tools: any): any[] {
+  const fromZod = (schema: any) => {
+    if (!schema) return { type: "object", properties: {} };
+    try {
+      return zodToJsonSchema(schema) || { type: "object", properties: {} };
+    } catch {
+      return { type: "object", properties: {} };
+    }
+  };
+
   if (Array.isArray(tools)) {
     return tools.map((t: any) => ({
       type: "function",
       function: {
         name: t.name,
         description: t.description,
-        parameters: t.inputSchema,
+        parameters: fromZod(t.inputSchema),
       },
     }));
   }
@@ -65,12 +76,14 @@ function toQwenTools(tools: any): any[] {
     function: {
       name: t.name,
       description: t.description,
-      parameters: t.inputSchema,
+      parameters: fromZod(t.inputSchema),
     },
   }));
 }
 
-chatEngine.setTools(toQwenTools(toolRegistry.getAll()) as any);
+const qwenTools = toQwenTools(toolRegistry.getAll());
+console.log("[DEBUG] Qwen tools:", JSON.stringify(qwenTools).substring(0, 500));
+chatEngine.setTools(qwenTools as any);
 chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
   const result = await toolExecutor.execute(name, args, sessionId);
   return { result: result.data, error: result.error || undefined };
