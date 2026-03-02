@@ -57,9 +57,10 @@ class ChatEngine {
       await this.parseAndScheduleTask(message, sessionId);
 
       const systemPrompt = this.buildSystemPrompt(user, soul, memory, skills);
-      const messages: ChatMessage[] = [
+      
+      const messages: any[] = [
         { role: "system", content: systemPrompt },
-        ...history,
+        ...history.map((h: any) => ({ role: h.role, content: h.content })),
         { role: "user", content: message },
       ];
 
