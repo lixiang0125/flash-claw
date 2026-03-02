@@ -19,6 +19,17 @@ import { globTool } from "./tools/builtin/glob";
 import { grepTool } from "./tools/builtin/grep";
 import { webFetchTool } from "./tools/builtin/web-fetch";
 import { webSearchTool } from "./tools/builtin/web-search";
+import { Database } from "bun:sqlite";
+import path from "path";
+import {
+  WorkingMemory,
+  ShortTermMemory,
+  VectorStore,
+  LongTermMemory,
+  UserProfileService,
+  MemoryManager,
+  OllamaEmbeddingProvider,
+} from "./memory";
 
 const app = new Hono();
 
@@ -28,6 +39,9 @@ const logger = {
   error: (msg: string) => console.error("[error]", msg),
   warn: (msg: string) => console.warn("[warn]", msg),
 };
+
+const dbPath = path.join(process.cwd(), "data", "flashclaw.db");
+const db = new Database(dbPath);
 
 const sandboxManager = createSandboxManager({}, logger);
 const toolRegistry = new ToolRegistry(logger);
@@ -48,6 +62,37 @@ const toolExecutor = new ToolExecutor(
   securityLayer,
   logger,
 );
+
+// Initialize Memory System
+const workingMemory = new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
+const shortTermMemory = new ShortTermMemory(db as any);
+shortTermMemory.initialize();
+
+const vectorStore = new VectorStore(db as any, logger, { dimensions: 384 });
+vectorStore.initialize().catch(err => logger.warn(`VectorStore init failed: ${err}`));
+
+const embedder = new OllamaEmbeddingProvider();
+embedder.initialize().catch(err => logger.warn(`Embedder init failed: ${err}`));
+
+const longTermMemory = new LongTermMemory(
+  vectorStore as any,
+  embedder as any,
+  db as any,
+  logger,
+);
+
+const userProfileService = new UserProfileService(db as any, logger);
+
+const memoryManager = new MemoryManager(
+  workingMemory,
+  shortTermMemory,
+  longTermMemory,
+  userProfileService,
+  logger,
+);
+
+chatEngine.setMemoryManager(memoryManager as any);
+logger.info("Memory system initialized");
 
 import { zodToJsonSchema } from "zod-to-json-schema";
 

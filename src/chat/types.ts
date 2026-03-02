@@ -3,6 +3,7 @@ import type { Skill } from "../skills";
 export interface ChatRequest {
   message: string;
   sessionId?: string;
+  userId?: string;
   skill?: string;
 }
 

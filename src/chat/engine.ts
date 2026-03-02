@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { listSkills, type Skill } from "../skills";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
-import { readUser, readSoul, readMemory, extractInfoToRemember } from "../memory";
+import { readUser, readSoul, readMemory, extractInfoToRemember, type IMemoryManager, type UserProfile } from "../memory";
 import { parseTaskFromMessage, cronToHumanReadable } from "./parsers";
 import { parseTaskWithLLM } from "./llm-parser";
 import type { ChatRequest, ChatResponse } from "./types";
@@ -29,6 +29,7 @@ class ChatEngine {
   private sessionSkills: Map<string, Skill[]> = new Map();
   private tools: any[] = [];
   private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
+  private memoryManager: IMemoryManager | null = null;
 
   constructor() {
     const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -42,6 +43,11 @@ class ChatEngine {
     });
   }
 
+  setMemoryManager(manager: IMemoryManager): void {
+    this.memoryManager = manager;
+    console.log("[ChatEngine] MemoryManager attached");
+  }
+
   setTools(tools: any[]): void {
     this.tools = tools;
     console.log("[DEBUG] setTools called with:", tools.length, "tools");
@@ -52,7 +58,7 @@ class ChatEngine {
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
-    const { message, sessionId = "default" } = request;
+    const { message, sessionId = "default", userId = "default" } = request;
     const history = this.getHistory(sessionId);
     const skills = this.getSessionSkills(sessionId);
 
@@ -62,7 +68,21 @@ class ChatEngine {
       const { user, soul, memory } = this.loadContext(sessionId);
       await this.parseAndScheduleTask(message, sessionId);
 
-      const systemPrompt = this.buildSystemPrompt(user, soul, memory, skills);
+      let relevantMemories = "";
+      if (this.memoryManager) {
+        const memResults = await this.memoryManager.recall({
+          text: message,
+          userId,
+          sessionId,
+          limit: 5,
+        });
+        if (memResults.length > 0) {
+          relevantMemories = "\n\n## 相关记忆\n" + 
+            memResults.map(m => `- ${m.entry.content}`).join("\n");
+        }
+      }
+
+      const systemPrompt = this.buildSystemPrompt(user, soul, memory, skills) + relevantMemories;
       
       const messages: any[] = [
         { role: "system", content: systemPrompt },
@@ -167,6 +187,18 @@ class ChatEngine {
       if (profile) {
         Object.assign(profile, info);
       }
+    }
+
+    if (this.memoryManager) {
+      this.memoryManager.storeInteraction(
+        {
+          sender: { id: sessionId },
+          conversationId: sessionId,
+          platform: "web",
+          content: { text: message },
+        } as any,
+        _response,
+      ).catch(err => console.error("[ChatEngine] Failed to store interaction:", err));
     }
   }
 
