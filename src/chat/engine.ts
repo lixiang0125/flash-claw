@@ -155,7 +155,7 @@ class ChatEngine {
         }
       }
 
-      this.saveContext(sessionId, message, lastResponse);
+      this.saveContext(sessionId, userId, message, lastResponse);
       history.push({ role: "user", content: message });
       history.push({ role: "assistant", content: lastResponse });
 
@@ -180,7 +180,7 @@ class ChatEngine {
     return { user, soul, memory };
   }
 
-  private saveContext(sessionId: string, message: string, _response: string) {
+  private saveContext(sessionId: string, userId: string, message: string, _response: string) {
     const info = extractInfoToRemember(message);
     if (info) {
       const profile = userProfileStore.get(sessionId);
@@ -192,11 +192,11 @@ class ChatEngine {
     if (this.memoryManager) {
       this.memoryManager.storeInteraction(
         {
-          sender: { id: sessionId },
+          sender: { id: userId },
           conversationId: sessionId,
           platform: "web",
           content: { text: message },
-        } as any,
+        },
         _response,
       ).catch(err => console.error("[ChatEngine] Failed to store interaction:", err));
     }
