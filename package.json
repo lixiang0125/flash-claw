@@ -23,9 +23,13 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.50",
+    "@ai-sdk/google": "^3.0.34",
+    "@ai-sdk/openai": "^3.0.37",
     "@langchain/openai": "^1.2.11",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@mozilla/readability": "^0.6.0",
+    "ai": "^6.0.105",
     "better-sqlite3": "^12.6.2",
     "cron-parser": "^5.5.0",
     "dotenv": "^17.3.1",
