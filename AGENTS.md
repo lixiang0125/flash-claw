@@ -6,6 +6,7 @@
 - 使用 Hono 构建 REST API
 - 使用 LangChain 接入大模型
 - 核心位置需补充注释
+- 不允许使用 any 类型
 
 ## 前端开发
 
