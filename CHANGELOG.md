@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+### Phase 2 - 工具与执行层 (2026-03-02)
+
+**改造点**:
+- ToolRegistry 工具注册中心
+- SandboxManager 沙箱管理器（本地模式）
+- ToolExecutor 工具执行生命周期
+- SecurityLayer 安全层（路径白名单、命令黑名单、限流、审计）
+- 内置工具: read_file, write_file, bash, glob, grep, web_fetch
+
 ### LLM Service 切换到 Vercel AI SDK (2026-03-02)
 
 **改造点**:
