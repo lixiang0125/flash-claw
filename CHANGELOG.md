@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+### Phase 1 重构 - LLM Service (2026-03-02)
+
+**改造点**:
+- 实现 LLM Service，使用 LangChain
+- 支持 generateText, streamText, generateObject 方法
+- 注册 LLM_SERVICE 到 bootstrap
+
 ### Phase 1 重构 - DI 容器 (2026-03-02)
 
 **目的**: 按照技术方案重构基础骨架，实现 Phase 1 目标
