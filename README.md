@@ -9,35 +9,16 @@
 - **AI**: LangChain + Qwen (阿里云百炼)
 - **前端**: React + Vite
 
-## 架构
+## 功能特性
 
-### Phase 1 基础骨架
-
-项目正在按照技术方案逐步重构核心架构：
-
-```
-src/core/
-├── container/     # DI 容器
-│   ├── types.ts      # 核心类型 (Token, Lifecycle)
-│   ├── container.ts  # 容器实现
-│   ├── tokens.ts     # 服务令牌定义
-│   ├── event-bus.ts # 事件总线
-│   ├── bootstrap.ts  # 启动引导
-│   └── llm-service.ts # LLM 服务封装
-├── agent/        # Agent 循环
-│   ├── types.ts      # Agent 类型
-│   ├── tool-registry.ts  # 工具注册
-│   ├── session-manager.ts # 会话管理
-│   └── agent-core.ts # Agent 核心
-└── index.ts      # FlashClaw 工厂函数
-```
-
-### DI 容器特性
-
-- Token-based 依赖注入
-- 支持 Singleton / Transient / Scoped 生命周期
-- 循环依赖检测
-- 异步初始化链
+- AI 对话：智能理解用户意图，支持多会话管理
+- 工具执行：内置多种工具（搜索、文件读写、代码执行等）
+- Skill 系统：支持自定义技能扩展
+- 任务调度：定时任务提醒
+- 飞书集成：接收和回复飞书消息
+- 记忆系统：记住用户偏好和重要信息
+- 子智能体：复杂任务自动拆分处理
+- Heartbeat：系统健康检查和自动通知
 
 ## 快速开始
 
