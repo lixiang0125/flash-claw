@@ -2,7 +2,6 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { ToolRegistry } from "./tool-registry";
 import { SessionManager } from "./session-manager";
 import { AgentCoreImpl } from "./agent-core";
-import { ChatOpenAI } from "@langchain/openai";
 
 describe("ToolRegistry", () => {
   let registry: ToolRegistry;
