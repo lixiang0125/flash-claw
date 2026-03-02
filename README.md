@@ -1,12 +1,12 @@
 # Flash Claw
 
-基于 Hono + Bun + Vercel AI SDK 的 AI 对话引擎，支持 Skill 执行系统和工具执行能力。
+基于 Hono + Bun + OpenAI SDK 的 AI 对话引擎，支持 Skill 执行系统和工具执行能力。
 
 ## 技术栈
 
 - **运行时**: Bun
 - **Web 框架**: Hono
-- **AI**: Vercel AI SDK (via @ai-sdk/openai-compatible) + Qwen (阿里云百炼)
+- **AI**: OpenAI SDK (DashScope 阿里云百炼) + Qwen Function Calling
 - **前端**: React 19 + Vite
 - **数据库**: SQLite (bun:sqlite)
 
@@ -62,21 +62,18 @@ bun run start      # 启动服务
 
 ### 工具执行
 
-AI 具有实际执行操作的能力，可以在对话中直接操作文件:
+AI 使用 Qwen Function Calling 自动调用工具:
 
-- **Read**: 读取文件内容
-- **Write**: 创建或写入文件
-- **Edit**: 编辑文件
-- **Bash**: 执行 shell 命令
-- **Glob**: 文件搜索
-- **Grep**: 内容搜索
-- **WebFetch**: 获取网页内容（使用 Jina AI Reader）
-- **WebSearch**: 互联网搜索（使用 Tavily）
-- **GetProfile**: 获取用户画像
-- **UpdateProfile**: 更新用户画像
-- **SubAgent**: 启动子智能体并行处理任务
+- **read_file**: 读取文件内容
+- **write_file**: 创建或写入文件
+- **edit_file**: 编辑文件
+- **bash**: 执行 shell 命令
+- **glob**: 文件搜索
+- **grep**: 内容搜索
+- **web_fetch**: 获取网页内容（自动提取主体内容并转为 Markdown）
+- **web_search**: 互联网搜索
 
-AI 使用 `[TOOL_CALL]` 格式触发工具调用，执行后会自动生成友好的回复。
+用户发送 URL 时，AI 会自动调用 web_fetch 工具获取内容并总结。
 
 ### 自迭代机制
 

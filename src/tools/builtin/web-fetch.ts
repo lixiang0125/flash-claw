@@ -56,6 +56,7 @@ async function fetchWithPlaywright(url: string, timeout = 30000): Promise<{ cont
 function htmlToMarkdown(html: string): string {
   const dom = new JSDOM(html);
   const doc = dom.window.document;
+  const { Node } = dom.window;
   let md = "";
 
   const getText = (el: globalThis.Element): string => {
@@ -124,6 +125,12 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
   inputExamples: [
     { input: { url: "https://docs.python.org/3/tutorial/classes.html", maxLength: 100000 } },
   ],
+  toModelOutput: (output: WebFetchOutput): string => {
+    if (!output.success) {
+      return `Error: ${output.error}`;
+    }
+    return output.content || `No content extracted from ${output.url}`;
+  },
   execute: async (input: { url: string; extractMainContent?: boolean; maxLength?: number; usePlaywright?: boolean }, _context: ToolExecutionContext): Promise<WebFetchOutput> => {
     const ssrfCheck = defaultSSRFProtection.check(input.url);
     if (!ssrfCheck.allowed) {

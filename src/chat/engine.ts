@@ -44,7 +44,7 @@ class ChatEngine {
 
   setTools(tools: any[]): void {
     this.tools = tools;
-    console.log("[DEBUG] setTools:", tools.length);
+    console.log("[DEBUG] setTools called with:", tools.length, "tools");
   }
 
   setToolExecutor(executor: (name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>): void {
@@ -55,6 +55,8 @@ class ChatEngine {
     const { message, sessionId = "default" } = request;
     const history = this.getHistory(sessionId);
     const skills = this.getSessionSkills(sessionId);
+
+    console.log("[DEBUG] chat called, tools available:", this.tools.length);
 
     try {
       const { user, soul, memory } = this.loadContext(sessionId);
@@ -118,6 +120,7 @@ class ChatEngine {
           }
 
           console.log("[TOOL_RESULT]", toolName, toolResult.error ? `ERROR: ${toolResult.error}` : "OK");
+          console.log("[TOOL_RESULT_CONTENT]", toolName, (toolResult.result || "").substring(0, 200));
 
           messages.push({
             role: "tool",

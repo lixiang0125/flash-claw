@@ -87,6 +87,12 @@ export const webSearchTool: FlashClawToolDefinition<typeof WebSearchInput, WebSe
     { input: { query: "TypeScript Zod schema validation tutorial", maxResults: 5 } },
     { input: { query: "Docker container security best practices 2026" } },
   ],
+  toModelOutput: (output: WebSearchOutput): string => {
+    if (output.results.length === 0) {
+      return `No results found for "${output.query}"`;
+    }
+    return output.results.map(r => `- [${r.title}](${r.url}): ${r.snippet}`).join("\n");
+  },
   execute: async (input: { query: string; maxResults?: number }, _context: ToolExecutionContext): Promise<WebSearchOutput> => {
     const providers: SearchProvider[] = [
       new DuckDuckGoProvider(),

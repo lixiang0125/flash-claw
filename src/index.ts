@@ -88,7 +88,8 @@ chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, s
   console.log(`[TOOL_CALL] ${name}`, JSON.stringify(args).substring(0, 200));
   const result = await toolExecutor.execute(name, args, sessionId);
   console.log(`[TOOL_RESULT] ${name}:`, result.success ? "OK" : result.error);
-  return { result: result.data, error: result.error || undefined };
+  console.log(`[TOOL_OUTPUT] ${name}:`, (result.output || "").substring(0, 200));
+  return { result: result.output, error: result.error || undefined };
 });
 
 console.log(`Registered ${toolRegistry.size} tools:`);

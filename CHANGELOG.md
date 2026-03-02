@@ -12,7 +12,9 @@ All notable changes to this project will be documented in this file.
 - SecurityLayer 安全层（路径白名单、命令黑名单、限流、审计）
 - 8 个内置工具: read_file, write_file, edit_file, bash, glob, grep, web_fetch, web_search
 - WebFetch 升级: SSRF 防护 + Playwright 回退 + 缓存
-- Chat Engine 重构: 使用 Vercel AI SDK + Qwen Function Calling
+- **Chat Engine 重构: 使用 OpenAI SDK + Qwen Function Calling**
+- **修复 web_fetch 工具在 Bun 运行时的问题 (Node 全局变量)**
+- **修复工具输出格式，确保模型能正确接收工具返回内容**
 
 ### LLM Service 切换到 Vercel AI SDK (2026-03-02)
 
