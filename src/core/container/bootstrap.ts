@@ -28,9 +28,11 @@ import { ToolRegistry } from "../../tools/tool-registry";
 import { ToolExecutor } from "../../tools/tool-executor";
 import { readFileTool } from "../../tools/builtin/read-file";
 import { writeFileTool } from "../../tools/builtin/write-file";
+import { editFileTool } from "../../tools/builtin/edit-file";
 import { bashTool } from "../../tools/builtin/bash";
 import { globTool } from "../../tools/builtin/glob";
 import { grepTool } from "../../tools/builtin/grep";
+import { webSearchTool } from "../../tools/builtin/web-search";
 
 export {
   CONFIG,
@@ -235,9 +237,11 @@ export function createContainer(): Container {
       const registry = new ToolRegistry(logger);
       registry.register(readFileTool);
       registry.register(writeFileTool);
+      registry.register(editFileTool);
       registry.register(bashTool);
       registry.register(globTool);
       registry.register(grepTool);
+      registry.register(webSearchTool);
       return registry;
     },
   });
