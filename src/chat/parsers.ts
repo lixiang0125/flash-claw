@@ -157,7 +157,11 @@ export function matchSkillByMessage(message: string, skills: Skill[]): Skill | n
 /**
  * 解析模型响应中的工具调用
  */
-export function parseToolCalls(response: string): { tool: string; args: Record<string, unknown> }[] {
+export function parseToolCalls(response: any): { tool: string; args: Record<string, unknown> }[] {
+  if (typeof response !== "string") {
+    return [];
+  }
+  
   const toolCalls: { tool: string; args: Record<string, unknown> }[] = [];
   
   const patterns = [
