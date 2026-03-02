@@ -70,6 +70,8 @@ class ChatEngine {
         iterations++;
 
         const aiTools = this.tools.size > 0 ? Object.fromEntries(this.tools) : undefined;
+        
+        console.log("[DEBUG] tools:", aiTools ? Object.keys(aiTools) : "none");
 
         const result = await generateText({
           model: this.model.chatModel(process.env.MODEL || "qwen-plus"),
@@ -80,9 +82,8 @@ class ChatEngine {
         const text = result.text;
         lastResponse = text;
 
-        if (!result.toolCalls || result.toolCalls.length === 0) {
-          break;
-        }
+        console.log("[DEBUG] toolCalls:", result.toolCalls?.length || 0);
+        console.log("[DEBUG] raw tool calls:", JSON.stringify(result.toolCalls).substring(0, 500));
 
         messages.push({ role: "assistant", content: text });
 

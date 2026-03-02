@@ -49,7 +49,28 @@ const toolExecutor = new ToolExecutor(
   logger,
 );
 
-chatEngine.setTools(toolRegistry.toAISDKTools() as any);
+function toQwenTools(tools: any): any[] {
+  if (Array.isArray(tools)) {
+    return tools.map((t: any) => ({
+      type: "function",
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      },
+    }));
+  }
+  return Object.values(tools).map((t: any) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    },
+  }));
+}
+
+chatEngine.setTools(toQwenTools(toolRegistry.getAll()) as any);
 chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
   const result = await toolExecutor.execute(name, args, sessionId);
   return { result: result.data, error: result.error || undefined };
