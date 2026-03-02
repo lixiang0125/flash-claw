@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+### Phase 1 重构 - 集成 (2026-03-02)
+
+**改造点**:
+- 添加 createFlashClaw 工厂函数
+- 导出 FlashClaw 接口 (run, registerTool)
+- 整合所有核心组件
+
 ### Phase 1 重构 - Agent Core (2026-03-02)
 
 **改造点**:
