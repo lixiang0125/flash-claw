@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - ToolExecutor 工具执行生命周期
 - SecurityLayer 安全层（路径白名单、命令黑名单、限流、审计）
 - 8 个内置工具: read_file, write_file, edit_file, bash, glob, grep, web_fetch, web_search
+- WebFetch 升级: SSRF 防护 + Playwright 回退 + 缓存
 
 ### LLM Service 切换到 Vercel AI SDK (2026-03-02)
 
