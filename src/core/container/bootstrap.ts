@@ -16,6 +16,7 @@ import {
   type EventBus,
 } from "./tokens";
 import { TypedEventBus } from "./event-bus";
+import { createLLMService } from "./llm-service";
 
 export { CONFIG, LOGGER, EVENT_BUS, DATABASE, LLM_SERVICE, AGENT_CORE };
 export type { AppConfig, Logger, Database, LLMService, AgentCore, EventBus };
@@ -168,6 +169,15 @@ export function createContainer(): Container {
       const config = resolver.resolve(CONFIG);
       const logger = resolver.resolve(LOGGER);
       return createDatabase(config, logger);
+    },
+  });
+
+  // 注册 LLM_SERVICE (依赖 CONFIG, LOGGER)
+  container.register({
+    token: LLM_SERVICE,
+    lifecycle: Lifecycle.Singleton,
+    factory: () => {
+      return createLLMService();
     },
   });
 
