@@ -1,32 +1,13 @@
 # FlashClaw 沙箱基础镜像
-# 参考 OpenClaw 的 Dockerfile.sandbox
-FROM debian:bookworm-slim
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# 安装基础工具链
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    bash \
-    ca-certificates \
-    curl \
-    git \
-    jq \
-    python3 \
-    python3-pip \
-    ripgrep \
-    fd-find \
-    tree \
-    wget \
-    unzip \
-  && rm -rf /var/lib/apt/lists/*
+# 基于已下载的 open-webui 镜像
+FROM ghcr.io/open-webui/open-webui:main
 
 # 创建非 root 沙箱用户
-RUN useradd --create-home --shell /bin/bash --uid 1000 sandbox
+RUN useradd --create-home --shell /bin/bash --uid 1000 sandbox || true
 
 # 创建工作目录结构
 RUN mkdir -p /workspace /tmp/sandbox \
-  && chown -R sandbox:sandbox /workspace /tmp/sandbox
+    && chown -R sandbox:sandbox /workspace /tmp/sandbox
 
 USER sandbox
 WORKDIR /workspace
