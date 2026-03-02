@@ -1,13 +1,14 @@
 # Flash Claw
 
-基于 Hono + Bun + LangChain 的 AI 对话引擎，支持 Skill 执行系统和工具执行能力。
+基于 Hono + Bun + Vercel AI SDK 的 AI 对话引擎，支持 Skill 执行系统和工具执行能力。
 
 ## 技术栈
 
 - **运行时**: Bun
 - **Web 框架**: Hono
 - **AI**: Vercel AI SDK (via @ai-sdk/openai-compatible) + Qwen (阿里云百炼)
-- **前端**: React + Vite
+- **前端**: React 19 + Vite
+- **数据库**: SQLite (bun:sqlite)
 
 ## 功能特性
 
@@ -204,8 +205,6 @@ AI 具备飞书文档、云盘、权限、Wiki 的操作能力：
 | POST | /api/heartbeat/trigger | 手动触发心跳 |
 | GET | /api/heartbeat/file | 获取 HEARTBEAT.md |
 | POST | /api/heartbeat/file | 更新 HEARTBEAT.md |
-| POST | /api/tasks/:id/run | 手动触发任务 |
-| GET | /api/tasks/:id/runs | 获取任务执行历史 |
 
 ### 对话接口
 
@@ -274,23 +273,45 @@ allowed_tools: Bash,Read,Write,Edit
 ```
 flash-claw/
 ├── src/
-│   ├── index.ts          # Hono 服务入口
-│   ├── chat.ts           # 对话引擎核心
-│   ├── skills/           # Skill 加载模块
-│   ├── tools/            # 工具定义和执行器
-│   └── integrations/
-│       └── feishu.ts     # 飞书机器人集成
-├── src/web/              # React 前端
-│   ├── components/       # UI 组件
-│   ├── hooks/            # 业务逻辑
-│   └── api/              # API 服务
-├── .flashclaw/skills/    # Skills 目录
+│   ├── index.ts              # Hono 服务入口
+│   ├── cli.ts                # CLI 命令行工具
+│   ├── chat/                 # 对话引擎
+│   │   ├── engine.ts        # 聊天核心逻辑
+│   │   ├── parsers.ts       # 消息解析器
+│   │   ├── llm-parser.ts   # LLM 任务解析
+│   │   └── types.ts        # 类型定义
+│   ├── core/                 # 核心基础设施
+│   │   ├── container/       # DI 容器
+│   │   │   ├── container.ts
+│   │   │   ├── bootstrap.ts
+│   │   │   ├── llm-service.ts
+│   │   │   └── tokens.ts
+│   │   └── agent/           # Agent 循环
+│   │       ├── agent-core.ts
+│   │       ├── session-manager.ts
+│   │       └── tool-registry.ts
+│   ├── Skill 加载模块
+│   ├── skills/              # tools/               # 工具定义和执行器
+│   ├── memory/              # 记忆系统
+│   ├── profiles/            # 用户画像
+│   ├── tasks/               # 任务调度
+│   ├── heartbeat/           # 心跳系统
+│   ├── subagents/           # 子智能体
+│   ├── evolution/           # 自迭代进化
+│   ├── integrations/        # 第三方集成
+│   │   └── feishu.ts        # 飞书集成
+│   └── web/                 # React 前端
+│       ├── components/     # UI 组件
+│       ├── hooks/          # 业务逻辑
+│       └── api/            # API 服务
+├── .flashclaw/skills/       # Skills 目录
+├── data/                    # SQLite 数据库
 ├── scripts/
-│   ├── release.ts        # 自动发布脚本
-│   └── build-web.ts      # 前端构建脚本
-├── .env                  # 环境变量 (不提交)
-├── .env.example          # 环境变量模板
-├── vite.config.mts       # Vite 配置
+│   ├── release.ts          # 自动发布脚本
+│   └── build-web.ts        # 前端构建脚本
+├── .env                     # 环境变量 (不提交)
+├── .env.example             # 环境变量模板
+├── vite.config.mts         # Vite 配置
 └── package.json
 ```
 
