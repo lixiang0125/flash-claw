@@ -7,8 +7,56 @@ import { feishuBot } from "./integrations/feishu";
 import { taskScheduler } from "./tasks";
 import { heartbeatSystem } from "./heartbeat";
 import { subAgentSystem } from "./subagents";
+import { ToolRegistry } from "./tools/tool-registry";
+import { ToolExecutor } from "./tools/tool-executor";
+import { createSandboxManager } from "./tools/sandbox";
+import { SecurityLayer } from "./security/security-layer";
+import { readFileTool } from "./tools/builtin/read-file";
+import { writeFileTool } from "./tools/builtin/write-file";
+import { editFileTool } from "./tools/builtin/edit-file";
+import { bashTool } from "./tools/builtin/bash";
+import { globTool } from "./tools/builtin/glob";
+import { grepTool } from "./tools/builtin/grep";
+import { webFetchTool } from "./tools/builtin/web-fetch";
+import { webSearchTool } from "./tools/builtin/web-search";
 
 const app = new Hono();
+
+const logger = {
+  info: (msg: string) => console.log("[info]", msg),
+  debug: (msg: string) => console.log("[debug]", msg),
+  error: (msg: string) => console.error("[error]", msg),
+  warn: (msg: string) => console.warn("[warn]", msg),
+};
+
+const sandboxManager = createSandboxManager({}, logger);
+const toolRegistry = new ToolRegistry(logger);
+toolRegistry.register(readFileTool);
+toolRegistry.register(writeFileTool);
+toolRegistry.register(editFileTool);
+toolRegistry.register(bashTool);
+toolRegistry.register(globTool);
+toolRegistry.register(grepTool);
+toolRegistry.register(webFetchTool);
+toolRegistry.register(webSearchTool);
+
+const securityLayer = new SecurityLayer(undefined, logger);
+
+const toolExecutor = new ToolExecutor(
+  new Map(toolRegistry.getAll().map((t: any) => [t.name, t])),
+  sandboxManager as any,
+  securityLayer,
+  logger,
+);
+
+chatEngine.setTools(toolRegistry.toAISDKTools() as any);
+chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
+  const result = await toolExecutor.execute(name, args, sessionId);
+  return { result: result.data, error: result.error || undefined };
+});
+
+console.log(`Registered ${toolRegistry.size} tools:`);
+toolRegistry.getAll().forEach((t: any) => console.log(`  - ${t.name}`));
 
 app.use("/*", serveStatic({ root: "./dist" }));
 

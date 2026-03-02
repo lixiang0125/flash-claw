@@ -1,135 +1,133 @@
-import { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
-import { listSkills, getSkill, type Skill } from "../skills";
-import { TOOLS, executeTool, type ToolResult } from "../tools";
+import { generateText } from "ai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { listSkills, type Skill } from "../skills";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
-import { readUser, readSoul, readMemory, updateMemory, updateUser, extractInfoToRemember } from "../memory";
-import { subAgentSystem } from "../subagents";
-import { analyzeComplexity } from "../subagents/analyzer";
-import { analyzeFeedback, evolve } from "../evolution";
-import type { ChatRequest, ChatResponse } from "./types";
-import { parseTaskFromMessage, matchSkillByMessage, parseToolCalls, cronToHumanReadable } from "./parsers";
+import { readUser, readSoul, readMemory, extractInfoToRemember } from "../memory";
+import { parseTaskFromMessage, cronToHumanReadable } from "./parsers";
 import { parseTaskWithLLM } from "./llm-parser";
+import type { ChatRequest, ChatResponse } from "./types";
 
-const useQwen = !!process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.includes("dashscope");
+const MAX_STEPS = 10;
 
-const MAX_TOOL_RETRIES = 3;
-const MAX_ITERATIONS = 3;
-const ENABLE_SELF_REVIEW = true;
-const ENABLE_AUTO_SUBAGENT = true;
+interface ChatMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  toolCallId?: string;
+  toolName?: string;
+}
 
 class ChatEngine {
-  private llm: ChatOpenAI;
-  private sessions: Map<string, (HumanMessage | AIMessage)[]> = new Map();
+  private model: ReturnType<typeof createOpenAICompatible>;
+  private sessions: Map<string, ChatMessage[]> = new Map();
   private sessionSkills: Map<string, Skill[]> = new Map();
+  private tools: Map<string, unknown> = new Map();
+  private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
 
   constructor() {
-    const model = useQwen ? (process.env.MODEL || "qwen-plus") : (process.env.MODEL || "gpt-4o-mini");
-    const baseURL = useQwen ? process.env.OPENAI_BASE_URL! : process.env.OPENAI_BASE_URL;
-    const apiKey = useQwen ? process.env.OPENAI_API_KEY! : process.env.OPENAI_API_KEY;
+    const modelName = process.env.MODEL || "qwen-plus";
+    const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    const apiKey = process.env.OPENAI_API_KEY || "";
 
-    console.log("Using model:", model);
+    console.log("Using model:", modelName);
     console.log("Using baseURL:", baseURL);
 
-    const llmConfig: any = {
-      modelName: model,
-      temperature: 0.7,
-    };
-    
-    if (baseURL) {
-      llmConfig.configuration = {
-        baseURL,
-      };
-    }
-    if (apiKey) {
-      llmConfig.apiKey = apiKey;
-    }
-    
-    this.llm = new ChatOpenAI(llmConfig);
+    this.model = createOpenAICompatible({
+      name: "dashscope",
+      baseURL,
+      apiKey,
+    });
+  }
+
+  setTools(tools: Map<string, unknown>): void {
+    this.tools = tools;
+  }
+
+  setToolExecutor(executor: (name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>): void {
+    this.toolExecutor = executor;
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const { message, sessionId = "default" } = request;
-
     const history = this.getHistory(sessionId);
     const skills = this.getSessionSkills(sessionId);
 
     try {
       const { user, soul, memory } = this.loadContext(sessionId);
-      const taskResult = await this.parseAndScheduleTask(message, sessionId);
+      await this.parseAndScheduleTask(message, sessionId);
 
-      let context = this.buildContext(user, soul, memory, skills);
-      let messages = [...context, ...history, new HumanMessage(message)];
+      const systemPrompt = this.buildSystemPrompt(user, soul, memory, skills);
+      const messages: ChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        ...history,
+        { role: "user", content: message },
+      ];
 
       let iterations = 0;
       let lastResponse = "";
 
-      while (iterations < MAX_ITERATIONS) {
+      while (iterations < MAX_STEPS) {
         iterations++;
 
-        const response = await this.llm.invoke(messages);
+        const aiTools = this.tools.size > 0 ? Object.fromEntries(this.tools) : undefined;
 
-        const content = response.content as string;
-        lastResponse = content;
+        const result = await generateText({
+          model: this.model.chatModel(process.env.MODEL || "qwen-plus"),
+          messages: messages as any,
+          tools: aiTools as any,
+        });
 
-        if (typeof content !== "string") {
+        const text = result.text;
+        lastResponse = text;
+
+        if (!result.toolCalls || result.toolCalls.length === 0) {
           break;
         }
 
-        messages.push(new AIMessage(content));
+        messages.push({ role: "assistant", content: text });
 
-        const toolCalls = parseToolCalls(response);
-        if (toolCalls.length === 0) {
-          break;
-        }
+        for (const toolCall of result.toolCalls) {
+          const toolName = toolCall.toolName;
+          const args = ((toolCall as any).args as Record<string, unknown>) || {};
 
-        for (const toolCall of toolCalls) {
-          let retries = 0;
-          let toolResult: ToolResult | undefined;
+          let toolResult = { result: null as unknown, error: "Tool executor not configured" } as { result: unknown; error: string };
 
-          while (retries < MAX_TOOL_RETRIES) {
+          if (this.toolExecutor) {
             try {
-              toolResult = await executeTool(toolCall.name, toolCall.args);
-              break;
+              toolResult = await this.toolExecutor(toolName, args, sessionId);
             } catch (error) {
-              retries++;
-              console.error(`Tool ${toolCall.name} failed (retry ${retries}):`, error);
+              toolResult = { result: null, error: String(error) };
             }
           }
 
-          if (toolResult) {
-            const resultContent = toolResult.error || JSON.stringify(toolResult.result);
-            messages.push(new AIMessage({
-              content: "",
-              tool_calls: [{
-                id: toolCall.id || toolCall.name,
-                name: toolCall.name,
-                args: toolCall.args,
-              }],
-            }));
-            messages.push(new HumanMessage(resultContent));
-          }
+          const resultContent = toolResult.error || JSON.stringify(toolResult.result);
+
+          messages.push({
+            role: "tool",
+            content: resultContent,
+            toolCallId: toolCall.toolCallId,
+            toolName,
+          });
         }
 
-        if (iterations >= MAX_ITERATIONS - 1) {
+        if (iterations >= MAX_STEPS - 1) {
           break;
         }
       }
 
       this.saveContext(sessionId, message, lastResponse);
-      history.push(new HumanMessage(message));
-      history.push(new AIMessage(lastResponse));
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: lastResponse });
 
       return {
         response: lastResponse,
         sessionId,
-        task: taskResult,
       };
-    } catch (error: any) {
-      console.error("Chat error:", error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Chat error:", err);
       return {
-        response: `处理消息时出错: ${error.message}`,
+        response: `处理消息时出错: ${err.message}`,
         sessionId,
       };
     }
@@ -142,36 +140,50 @@ class ChatEngine {
     return { user, soul, memory };
   }
 
-  private saveContext(sessionId: string, message: string, response: string) {
+  private saveContext(sessionId: string, message: string, _response: string) {
     const info = extractInfoToRemember(message);
     if (info) {
-      updateUser(sessionId, info);
+      const profile = userProfileStore.get(sessionId);
+      if (profile) {
+        Object.assign(profile, info);
+      }
     }
   }
 
-  private buildContext(user: any, soul: any, memory: any, skills: Skill[]) {
-    const messages: (HumanMessage | SystemMessage)[] = [];
+  private buildSystemPrompt(user: unknown, soul: unknown, memory: unknown, skills: Skill[]): string {
+    let prompt = (soul as { prompt?: string })?.prompt || "You are a helpful AI assistant.";
 
-    let systemPrompt = soul?.prompt || "You are a helpful AI assistant.";
     if (skills.length > 0) {
       const skillDescriptions = skills.map(s => `- ${s.name}: ${s.description}`).join("\n");
-      systemPrompt += `\n\nAvailable skills:\n${skillDescriptions}`;
+      prompt += `\n\nAvailable skills:\n${skillDescriptions}`;
     }
 
-    messages.push(new SystemMessage(systemPrompt));
+    const toolDescriptions = [
+      "- web_fetch: 获取指定 URL 的网页内容。用于总结网页、公众号文章等。",
+      "- web_search: 搜索互联网信息。",
+      "- read_file: 读取文件内容。",
+      "- write_file: 写入文件。",
+      "- edit_file: 编辑文件。",
+      "- bash: 执行 shell 命令。",
+      "- glob: 搜索文件。",
+      "- grep: 搜索文件内容。",
+    ].join("\n");
 
-    if (user?.name) {
-      messages.push(new HumanMessage(`User's name: ${user.name}`));
+    prompt += `\n\nAvailable tools:\n${toolDescriptions}`;
+    prompt += `\n\n重要：当用户发送 URL 时，你应该自动使用 web_fetch 工具获取内容并总结。不需要询问用户。`;
+
+    if (user && (user as { name?: string }).name) {
+      prompt += `\n\nUser's name: ${(user as { name: string }).name}`;
     }
 
     if (memory) {
-      messages.push(new HumanMessage(`User memory: ${memory}`));
+      prompt += `\n\nUser memory: ${memory}`;
     }
 
-    return messages;
+    return prompt;
   }
 
-  private async parseAndScheduleTask(message: string, sessionId: string) {
+  private async parseAndScheduleTask(message: string, sessionId: string): Promise<string | null> {
     const task = parseTaskFromMessage(message);
     if (task) {
       const schedule = task.cron || cronToHumanReadable(task.cron || "");
@@ -179,6 +191,7 @@ class ChatEngine {
         name: task.name,
         message: task.message,
         schedule,
+        enabled: true,
       });
       return `已创建任务: ${task.name} - ${schedule}`;
     }
@@ -190,6 +203,7 @@ class ChatEngine {
           name: result.name,
           message: result.message,
           schedule: result.schedule,
+          enabled: true,
         });
         return `已创建任务: ${result.name}`;
       }
@@ -200,7 +214,7 @@ class ChatEngine {
     return null;
   }
 
-  private getHistory(sessionId: string): (HumanMessage | AIMessage)[] {
+  private getHistory(sessionId: string): ChatMessage[] {
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, []);
     }
@@ -219,7 +233,7 @@ class ChatEngine {
     this.sessionSkills.delete(sessionId);
   }
 
-  getHistoryMessages(sessionId: string): (HumanMessage | AIMessage)[] {
+  getHistoryMessages(sessionId: string): ChatMessage[] {
     return this.getHistory(sessionId);
   }
 }
