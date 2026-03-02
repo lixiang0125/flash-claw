@@ -2,6 +2,7 @@ import { z, ZodType } from "zod";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import type { FlashClawToolDefinition, ToolExecutionContext } from "./types.js";
+import { defaultSSRFProtection } from "../../infra/net/ssrf.js";
 
 const MAX_CONTENT_LENGTH = 80_000;
 
@@ -9,10 +10,12 @@ const WebFetchInput: ZodType<{
   url: string;
   extractMainContent?: boolean;
   maxLength?: number;
+  usePlaywright?: boolean;
 }> = z.object({
   url: z.string().url().describe("要获取的 URL"),
   extractMainContent: z.boolean().default(true).describe("是否提取主要内容"),
   maxLength: z.number().int().min(1000).max(200_000).default(80_000).describe("最大字符数"),
+  usePlaywright: z.boolean().default(false).describe("是否使用 Playwright 渲染 JS (对 SPA 有效)"),
 });
 
 interface WebFetchOutput {
@@ -23,33 +26,165 @@ interface WebFetchOutput {
   content?: string;
   contentLength?: number;
   error?: string;
+  usedPlaywright?: boolean;
+}
+
+const fetchCache = new Map<string, { content: string; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000;
+
+async function fetchWithPlaywright(url: string, timeout = 30000): Promise<{ content: string; title: string }> {
+  const { chromium } = await import("playwright");
+
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle", timeout });
+
+    const title = await page.title();
+    const content = await page.content();
+
+    return { content, title };
+  } finally {
+    await browser.close();
+  }
+}
+
+function htmlToMarkdown(html: string): string {
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
+  let md = "";
+
+  const getText = (el: globalThis.Element): string => {
+    return el.textContent?.trim().replace(/\s+/g, " ") || "";
+  };
+
+  const processNode = (node: globalThis.Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent?.trim() || "";
+      if (text) md += text;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    const el = node as globalThis.Element;
+    const tag = el.tagName.toLowerCase();
+
+    switch (tag) {
+      case "h1": md += `\n# ${getText(el)}\n`; break;
+      case "h2": md += `\n## ${getText(el)}\n`; break;
+      case "h3": md += `\n### ${getText(el)}\n`; break;
+      case "h4": md += `\n#### ${getText(el)}\n`; break;
+      case "h5": md += `\n##### ${getText(el)}\n`; break;
+      case "h6": md += `\n###### ${getText(el)}\n`; break;
+      case "p": md += `\n${getText(el)}\n`; break;
+      case "br": md += "\n"; break;
+      case "hr": md += "\n---\n"; break;
+      case "li": md += `- ${getText(el)}\n`; break;
+      case "blockquote": md += `\n> ${getText(el)}\n`; break;
+      case "pre": {
+        const codeEl = el.querySelector("code");
+        const code = codeEl ? getText(codeEl) : getText(el);
+        md += `\n\`\`\`\n${code}\n\`\`\`\n`;
+        break;
+      }
+      case "code": md += `\`${getText(el)}\``; break;
+      case "a": md += `[${getText(el)}](${el.getAttribute("href") || ""})`; break;
+      case "strong": md += `**${getText(el)}**`; break;
+      case "em": md += `*${getText(el)}*`; break;
+      default: {
+        const children = Array.from(el.childNodes);
+        children.forEach(processNode);
+      }
+    }
+  };
+
+  const body = doc.body;
+  if (body) {
+    Array.from(body.childNodes).forEach(processNode);
+  }
+  return md.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetchOutput> = {
   name: "web_fetch",
   description:
     "获取指定 URL 的网页内容，自动将 HTML 转换为 Markdown 格式，提取主体内容。" +
-    "适合阅读文档页面、博客文章、API 文档等。",
+    "适合阅读文档页面、博客文章、API 文档等。" +
+    "对于 JavaScript 渲染的 SPA 页面，可设置 usePlaywright: true。",
   inputSchema: WebFetchInput,
   permissionLevel: "read",
   category: "web",
   requiresSandbox: false,
-  timeoutMs: 30_000,
+  timeoutMs: 60_000,
   needsApproval: false,
   strict: true,
   inputExamples: [
     { input: { url: "https://docs.python.org/3/tutorial/classes.html" } },
+    { input: { url: "https://example.com/spa", usePlaywright: true } },
   ],
-  execute: async (input: { url: string; extractMainContent?: boolean; maxLength?: number }, _context: ToolExecutionContext): Promise<WebFetchOutput> => {
+  execute: async (input: { url: string; extractMainContent?: boolean; maxLength?: number; usePlaywright?: boolean }, _context: ToolExecutionContext): Promise<WebFetchOutput> => {
+    const ssrfCheck = defaultSSRFProtection.check(input.url);
+    if (!ssrfCheck.allowed) {
+      return {
+        success: false,
+        url: input.url,
+        error: `SSRF protection: ${ssrfCheck.reason}`,
+      };
+    }
+
+    const cacheKey = input.url;
+    const cached = fetchCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return {
+        success: true,
+        url: input.url,
+        content: cached.content,
+        contentLength: cached.content.length,
+      };
+    }
+
     try {
+      if (input.usePlaywright) {
+        const { content, title } = await fetchWithPlaywright(input.url, 30000);
+        let markdown = htmlToMarkdown(content);
+
+        if (input.extractMainContent) {
+          const dom = new JSDOM(content, { url: input.url });
+          const reader = new Readability(dom.window.document);
+          const article = reader.parse();
+          markdown = htmlToMarkdown(article?.content || content);
+        }
+
+        if (markdown.length > (input.maxLength || MAX_CONTENT_LENGTH)) {
+          markdown = markdown.substring(0, input.maxLength || MAX_CONTENT_LENGTH) +
+            `\n\n[Content truncated at ${input.maxLength || MAX_CONTENT_LENGTH} characters]`;
+        }
+
+        fetchCache.set(cacheKey, { content: markdown, timestamp: Date.now() });
+
+        return {
+          success: true,
+          url: input.url,
+          title,
+          content: markdown,
+          contentLength: markdown.length,
+          usedPlaywright: true,
+        };
+      }
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 25000);
 
       const response = await fetch(input.url, {
         signal: controller.signal,
         headers: {
-          "User-Agent": "FlashClaw/0.1.0 (Personal AI Agent)",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
         },
         redirect: "follow",
       });
@@ -76,14 +211,14 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
           const reader = new Readability(dom.window.document);
           const article = reader.parse();
           title = article?.title;
-          content = article?.content || "";
-          content = htmlToMarkdown(content);
+          content = htmlToMarkdown(article?.content || "");
         } else {
           title = dom.window.document.title;
           content = htmlToMarkdown(rawHtml);
         }
       } else if (contentType.includes("application/json")) {
-        content = JSON.stringify(JSON.parse(rawHtml), null, 2);
+        const json = JSON.parse(rawHtml);
+        content = JSON.stringify(json, null, 2);
       } else {
         content = rawHtml;
       }
@@ -92,6 +227,8 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
         content = content.substring(0, input.maxLength || MAX_CONTENT_LENGTH) +
           `\n\n[Content truncated at ${input.maxLength || MAX_CONTENT_LENGTH} characters]`;
       }
+
+      fetchCache.set(cacheKey, { content, timestamp: Date.now() });
 
       return {
         success: true,
@@ -102,6 +239,22 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
         contentLength: content.length,
       };
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return {
+          success: false,
+          url: input.url,
+          error: "Request timeout",
+        };
+      }
+
+      if (input.usePlaywright) {
+        return {
+          success: false,
+          url: input.url,
+          error: `Playwright failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        };
+      }
+
       return {
         success: false,
         url: input.url,
@@ -110,40 +263,3 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
     }
   },
 };
-
-function htmlToMarkdown(html: string): string {
-  const dom = new JSDOM(html);
-  const doc = dom.window.document;
-  let md = "";
-
-  const processNode = (node: Node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      md += node.textContent?.trim() || "";
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-    const el = node as Element;
-    const tag = el.tagName.toLowerCase();
-
-    switch (tag) {
-      case "h1": md += `\n# ${getText(el)}\n`; break;
-      case "h2": md += `\n## ${getText(el)}\n`; break;
-      case "h3": md += `\n### ${getText(el)}\n`; break;
-      case "p": md += `\n${getText(el)}\n`; break;
-      case "li": md += `- ${getText(el)}\n`; break;
-      case "code": md += `\`${getText(el)}\``; break;
-      case "pre": md += `\n\`\`\`\n${getText(el)}\n\`\`\`\n`; break;
-      case "a": md += `[${getText(el)}](${el.getAttribute("href")})`; break;
-      case "br": md += "\n"; break;
-      default: Array.from(el.childNodes).forEach(processNode);
-    }
-  };
-
-  Array.from(doc.body.childNodes).forEach(processNode);
-  return md.replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function getText(el: Element): string {
-  return el.textContent?.trim() || "";
-}

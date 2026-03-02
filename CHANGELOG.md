@@ -6,10 +6,11 @@ All notable changes to this project will be documented in this file.
 
 **改造点**:
 - ToolRegistry 工具注册中心
-- SandboxManager 沙箱管理器（本地模式）
+- SandboxManager 沙箱管理器（本地 + Docker 模式）
+- DockerSandboxManager (容器池、预热、回收)
 - ToolExecutor 工具执行生命周期
 - SecurityLayer 安全层（路径白名单、命令黑名单、限流、审计）
-- 内置工具: read_file, write_file, bash, glob, grep, web_fetch
+- 8 个内置工具: read_file, write_file, edit_file, bash, glob, grep, web_fetch, web_search
 
 ### LLM Service 切换到 Vercel AI SDK (2026-03-02)
 
