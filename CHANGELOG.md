@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+### Phase 1 重构 - Agent Core (2026-03-02)
+
+**改造点**:
+- 实现 ToolRegistry 工具注册中心
+- 实现 SessionManager 会话管理器
+- 实现 AgentCoreImpl 智能体循环
+- 添加类型定义和单元测试
+- 注意: tool calling 还需要进一步完善
+
 ### Phase 1 重构 - LLM Service (2026-03-02)
 
 **改造点**:
