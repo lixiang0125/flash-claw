@@ -29,7 +29,7 @@ export const bashTool: FlashClawToolDefinition<typeof BashInput, BashOutput> = {
   inputSchema: BashInput,
   permissionLevel: "execute",
   category: "shell",
-  requiresSandbox: false,
+  requiresSandbox: true,
   timeoutMs: 60_000,
   needsApproval: true,
   strict: false,

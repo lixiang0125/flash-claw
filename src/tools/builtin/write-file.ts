@@ -23,7 +23,7 @@ export const writeFileTool: FlashClawToolDefinition<typeof WriteFileInput, Write
   inputSchema: WriteFileInput,
   permissionLevel: "write",
   category: "filesystem",
-  requiresSandbox: false,
+  requiresSandbox: true,
   timeoutMs: 30_000,
   needsApproval: true,
   strict: true,

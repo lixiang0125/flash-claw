@@ -31,7 +31,7 @@ export const readFileTool: FlashClawToolDefinition<typeof ReadFileInput, ReadFil
   inputSchema: ReadFileInput,
   permissionLevel: "read",
   category: "filesystem",
-  requiresSandbox: false,
+  requiresSandbox: true,
   timeoutMs: 10_000,
   needsApproval: false,
   strict: true,

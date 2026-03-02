@@ -8,18 +8,52 @@ import {
   DATABASE,
   LLM_SERVICE,
   AGENT_CORE,
+  SANDBOX_MANAGER,
+  TOOL_REGISTRY,
+  TOOL_EXECUTOR,
   type AppConfig,
   type Logger,
   type Database,
   type LLMService,
   type AgentCore,
   type EventBus,
+  type SandboxManager,
+  type ToolRegistry as IToolRegistry,
+  type ToolExecutor as IToolExecutor,
 } from "./tokens";
 import { TypedEventBus } from "./event-bus";
 import { createLLMService } from "./llm-service";
+import { createSandboxManager } from "../../tools/sandbox";
+import { ToolRegistry } from "../../tools/tool-registry";
+import { ToolExecutor } from "../../tools/tool-executor";
+import { readFileTool } from "../../tools/builtin/read-file";
+import { writeFileTool } from "../../tools/builtin/write-file";
+import { bashTool } from "../../tools/builtin/bash";
+import { globTool } from "../../tools/builtin/glob";
+import { grepTool } from "../../tools/builtin/grep";
 
-export { CONFIG, LOGGER, EVENT_BUS, DATABASE, LLM_SERVICE, AGENT_CORE };
-export type { AppConfig, Logger, Database, LLMService, AgentCore, EventBus };
+export {
+  CONFIG,
+  LOGGER,
+  EVENT_BUS,
+  DATABASE,
+  LLM_SERVICE,
+  AGENT_CORE,
+  SANDBOX_MANAGER,
+  TOOL_REGISTRY,
+  TOOL_EXECUTOR,
+};
+export type {
+  AppConfig,
+  Logger,
+  Database,
+  LLMService,
+  AgentCore,
+  EventBus,
+  SandboxManager,
+  IToolRegistry,
+  IToolExecutor,
+};
 
 export function loadConfig(): AppConfig {
   return {
@@ -178,6 +212,52 @@ export function createContainer(): Container {
     lifecycle: Lifecycle.Singleton,
     factory: () => {
       return createLLMService();
+    },
+  });
+
+  // 注册 SANDBOX_MANAGER (依赖 LOGGER)
+  container.register({
+    token: SANDBOX_MANAGER,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const useDocker = process.env.USE_DOCKER_SANDBOX === "true";
+      return createSandboxManager({ useDocker }, logger);
+    },
+  });
+
+  // 注册 TOOL_REGISTRY (依赖 LOGGER)
+  container.register({
+    token: TOOL_REGISTRY,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const registry = new ToolRegistry(logger);
+      registry.register(readFileTool);
+      registry.register(writeFileTool);
+      registry.register(bashTool);
+      registry.register(globTool);
+      registry.register(grepTool);
+      return registry;
+    },
+  });
+
+  // 注册 TOOL_EXECUTOR (依赖 SANDBOX_MANAGER, TOOL_REGISTRY, LOGGER)
+  container.register({
+    token: TOOL_EXECUTOR,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const sandboxManager = resolver.resolve(SANDBOX_MANAGER);
+      const toolRegistry = resolver.resolve(TOOL_REGISTRY);
+      const { SecurityLayer } = require("../../security/security-layer");
+      const securityLayer = new SecurityLayer(undefined, logger);
+      return new ToolExecutor(
+        new Map(toolRegistry.getAll().map((t: any) => [t.name, t])),
+        sandboxManager as any,
+        securityLayer,
+        logger
+      );
     },
   });
 

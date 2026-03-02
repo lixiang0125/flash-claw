@@ -22,7 +22,7 @@ export const globTool: FlashClawToolDefinition<typeof GlobInput, GlobOutput> = {
   inputSchema: GlobInput,
   permissionLevel: "read",
   category: "search",
-  requiresSandbox: false,
+  requiresSandbox: true,
   timeoutMs: 15_000,
   needsApproval: false,
   strict: true,

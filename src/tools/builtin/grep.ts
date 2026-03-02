@@ -40,7 +40,7 @@ export const grepTool: FlashClawToolDefinition<typeof GrepInput, GrepOutput> = {
   inputSchema: GrepInput,
   permissionLevel: "read",
   category: "search",
-  requiresSandbox: false,
+  requiresSandbox: true,
   timeoutMs: 15_000,
   needsApproval: false,
   strict: true,

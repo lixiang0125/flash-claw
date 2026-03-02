@@ -99,3 +99,29 @@ export interface AgentCore {
 
 export const AGENT_CORE: ServiceToken<AgentCore> =
   createToken<AgentCore>("AGENT_CORE");
+
+export interface SandboxManager {
+  initialize(): Promise<void>;
+  acquire(sessionId: string): Promise<unknown>;
+  release(sessionId: string): Promise<void>;
+  exec(sessionId: string, command: string, timeoutMs?: number): Promise<unknown>;
+  dispose(): Promise<void>;
+}
+
+export const SANDBOX_MANAGER: ServiceToken<SandboxManager> =
+  createToken<SandboxManager>("SANDBOX_MANAGER");
+
+export interface ToolRegistry {
+  getAll(): Array<{ name: string; description: string; inputSchema: unknown }>;
+  get(name: string): unknown;
+}
+
+export const TOOL_REGISTRY: ServiceToken<ToolRegistry> =
+  createToken<ToolRegistry>("TOOL_REGISTRY");
+
+export interface ToolExecutor {
+  execute(toolName: string, input: unknown, sessionId: string): Promise<unknown>;
+}
+
+export const TOOL_EXECUTOR: ServiceToken<ToolExecutor> =
+  createToken<ToolExecutor>("TOOL_EXECUTOR");
