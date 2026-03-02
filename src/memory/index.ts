@@ -15,6 +15,7 @@ export {
 export { MemoryManager, type IMemoryManager, type IncomingMessage } from "./memory-manager";
 export { ContextBudget, type ContextBudgetConfig } from "./context-budget";
 export { UserProfileService, type UserProfile } from "./user-profile";
+export { createDatabaseAdapter } from "./db-adapter";
 
 import * as Legacy from "./legacy";
 export const readUser = Legacy.readUser;

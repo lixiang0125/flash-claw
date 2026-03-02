@@ -29,6 +29,7 @@ import {
   UserProfileService,
   MemoryManager,
   OllamaEmbeddingProvider,
+  createDatabaseAdapter,
 } from "./memory";
 
 const app = new Hono();
@@ -41,7 +42,8 @@ const logger = {
 };
 
 const dbPath = path.join(process.cwd(), "data", "flashclaw.db");
-const db = new Database(dbPath);
+const bunDb = new Database(dbPath);
+const db = createDatabaseAdapter(bunDb);
 
 const sandboxManager = createSandboxManager({}, logger);
 const toolRegistry = new ToolRegistry(logger);
