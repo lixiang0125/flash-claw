@@ -1,10 +1,10 @@
 import { z, ZodType } from "zod";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
-import type { FlashClawToolDefinition, ToolExecutionContext } from "./types.js";
+import type { FlashClawToolDefinition, ToolExecutionContext } from "../types";
 import { defaultSSRFProtection } from "../../infra/net/ssrf.js";
 
-const MAX_CONTENT_LENGTH = 80_000;
+const MAX_CONTENT_LENGTH = 150_000;
 
 const WebFetchInput: ZodType<{
   url: string;
@@ -14,7 +14,7 @@ const WebFetchInput: ZodType<{
 }> = z.object({
   url: z.string().url().describe("要获取的 URL"),
   extractMainContent: z.boolean().default(true).describe("是否提取主要内容"),
-  maxLength: z.number().int().min(1000).max(200_000).default(80_000).describe("最大字符数"),
+  maxLength: z.number().int().min(1000).max(200_000).default(150_000).describe("最大字符数"),
   usePlaywright: z.boolean().default(false).describe("是否使用 Playwright 渲染 JS (对 SPA 有效)"),
 });
 
@@ -62,7 +62,7 @@ function htmlToMarkdown(html: string): string {
     return el.textContent?.trim().replace(/\s+/g, " ") || "";
   };
 
-  const processNode = (node: globalThis.Node) => {
+  const processNode = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent?.trim() || "";
       if (text) md += text;
@@ -113,8 +113,7 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
   name: "web_fetch",
   description:
     "获取指定 URL 的网页内容，自动将 HTML 转换为 Markdown 格式，提取主体内容。" +
-    "适合阅读文档页面、博客文章、API 文档等。" +
-    "对于 JavaScript 渲染的 SPA 页面，可设置 usePlaywright: true。",
+    "适合阅读文档页面、博客文章、API 文档、公众号文章等。",
   inputSchema: WebFetchInput,
   permissionLevel: "read",
   category: "web",
@@ -123,8 +122,7 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
   needsApproval: false,
   strict: true,
   inputExamples: [
-    { input: { url: "https://docs.python.org/3/tutorial/classes.html" } },
-    { input: { url: "https://example.com/spa", usePlaywright: true } },
+    { input: { url: "https://docs.python.org/3/tutorial/classes.html", maxLength: 100000 } },
   ],
   execute: async (input: { url: string; extractMainContent?: boolean; maxLength?: number; usePlaywright?: boolean }, _context: ToolExecutionContext): Promise<WebFetchOutput> => {
     const ssrfCheck = defaultSSRFProtection.check(input.url);
@@ -210,10 +208,10 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
         if (input.extractMainContent) {
           const reader = new Readability(dom.window.document);
           const article = reader.parse();
-          title = article?.title;
+          title = article?.title ?? undefined;
           content = htmlToMarkdown(article?.content || "");
         } else {
-          title = dom.window.document.title;
+          title = dom.window.document.title ?? undefined;
           content = htmlToMarkdown(rawHtml);
         }
       } else if (contentType.includes("application/json")) {
@@ -227,6 +225,8 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
         content = content.substring(0, input.maxLength || MAX_CONTENT_LENGTH) +
           `\n\n[Content truncated at ${input.maxLength || MAX_CONTENT_LENGTH} characters]`;
       }
+
+      console.log(`[web_fetch] URL: ${input.url}, rawHTML: ${rawHtml.length}, content: ${content.length}`);
 
       fetchCache.set(cacheKey, { content, timestamp: Date.now() });
 
