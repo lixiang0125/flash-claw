@@ -280,7 +280,7 @@ export function createContainer(): Container {
     },
   });
 
-  // ===== Phase 3: Memory System =====
+  // ===== Memory System =====
 
   // 嵌入服务
   container.register({

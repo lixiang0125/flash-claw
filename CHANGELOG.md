@@ -40,14 +40,18 @@ All notable changes to this project will be documented in this file.
 - 修复 LangChain API 兼容性问题
 - 修复解析工具调用和记忆功能的 bug
 
-### Phase 1 重构 - 集成 (2026-03-02)
+### 基础设施重构 (2026-03-02)
 
 **改造点**:
 - 添加 createFlashClaw 工厂函数
 - 导出 FlashClaw 接口 (run, registerTool)
 - 整合所有核心组件
-
-### Phase 1 重构 - Agent Core (2026-03-02)
+- 使用 Vercel AI SDK 替换 LangChain
+- 使用 @ai-sdk/openai-compatible provider
+- 成功集成 DashScope (qwen-plus)
+- 简化 Chat Engine，保留核心功能
+- 修复 LangChain API 兼容性问题
+- 修复解析工具调用和记忆功能的 bug
 
 **改造点**:
 - 实现 ToolRegistry 工具注册中心
@@ -56,16 +60,14 @@ All notable changes to this project will be documented in this file.
 - 添加类型定义和单元测试
 - 注意: tool calling 还需要进一步完善
 
-### Phase 1 重构 - LLM Service (2026-03-02)
+### LLM Service 实现 (2026-03-02)
 
 **改造点**:
 - 实现 LLM Service，使用 LangChain
 - 支持 generateText, streamText, generateObject 方法
 - 注册 LLM_SERVICE 到 bootstrap
 
-### Phase 1 重构 - DI 容器 (2026-03-02)
-
-**目的**: 按照技术方案重构基础骨架，实现 Phase 1 目标
+### DI 容器实现 (2026-03-02)
 
 **改造点**:
 - 实现 Token-based DI 容器 (Container, ScopedContainer)

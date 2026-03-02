@@ -126,7 +126,7 @@ export interface ToolExecutor {
 export const TOOL_EXECUTOR: ServiceToken<ToolExecutor> =
   createToken<ToolExecutor>("TOOL_EXECUTOR");
 
-// ===== Phase 3: Memory System =====
+// ===== Memory System =====
 
 export interface IEmbeddingService {
   embed(text: string): Promise<number[]>;
