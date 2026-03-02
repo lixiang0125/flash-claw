@@ -1,5 +1,5 @@
 import { generateText, streamText, generateObject } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
 export interface LLMOptions {
   temperature?: number;
@@ -18,20 +18,20 @@ export function createLLMService(): LLMService {
   const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
   const apiKey = process.env.OPENAI_API_KEY || "";
 
-  const openai = createOpenAI({
-    apiKey,
+  const openai = createOpenAICompatible({
+    name: "dashscope",
     baseURL,
+    apiKey,
   });
 
   return {
     async generateText(prompt: string, options?: LLMOptions): Promise<string> {
       const result = await generateText({
-        model,
+        model: openai(model),
         prompt,
         temperature: options?.temperature,
-        maxTokens: options?.maxTokens,
+        maxOutputTokens: options?.maxTokens,
         system: options?.systemPrompt,
-        provider: openai,
       });
 
       return result.text;
@@ -39,12 +39,11 @@ export function createLLMService(): LLMService {
 
     async *streamText(prompt: string, options?: LLMOptions): AsyncIterable<string> {
       const result = streamText({
-        model,
+        model: openai(model),
         prompt,
         temperature: options?.temperature,
-        maxTokens: options?.maxTokens,
+        maxOutputTokens: options?.maxTokens,
         system: options?.systemPrompt,
-        provider: openai,
       });
 
       for await (const chunk of result.textStream) {
@@ -58,13 +57,12 @@ export function createLLMService(): LLMService {
       options?: LLMOptions,
     ): Promise<T> {
       const result = await generateObject({
-        model,
+        model: openai(model),
         prompt,
         schema: schema as any,
         temperature: options?.temperature,
-        maxTokens: options?.maxTokens,
+        maxOutputTokens: options?.maxTokens,
         system: options?.systemPrompt,
-        provider: openai,
       });
 
       return result.object as T;

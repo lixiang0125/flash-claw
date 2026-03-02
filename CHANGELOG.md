@@ -6,8 +6,8 @@ All notable changes to this project will be documented in this file.
 
 **改造点**:
 - 使用 Vercel AI SDK 替换 LangChain
-- 使用 @ai-sdk/openai provider
-- 注意: DashScope 集成还需要更多配置（AI Gateway 问题）
+- 使用 @ai-sdk/openai-compatible provider
+- 成功集成 DashScope (qwen-plus)
 
 ### Chat Engine 集成 (2026-03-02)
 

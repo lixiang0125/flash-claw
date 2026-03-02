@@ -6,7 +6,7 @@
 
 - **运行时**: Bun
 - **Web 框架**: Hono
-- **AI**: Vercel AI SDK + Qwen (阿里云百炼)
+- **AI**: Vercel AI SDK (via @ai-sdk/openai-compatible) + Qwen (阿里云百炼)
 - **前端**: React + Vite
 
 ## 功能特性

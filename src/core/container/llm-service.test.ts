@@ -15,15 +15,13 @@ describe("LLMService (Vercel AI SDK)", () => {
     expect(llmService.generateObject).toBeDefined();
   });
 
-  test.skip("should generate text", async () => {
-    // Skip - Vercel AI SDK v6 AI Gateway issue with DashScope
+  test("should generate text", async () => {
     const result = await llmService.generateText("Say 'hello' in one word");
     expect(result).toBeDefined();
     expect(typeof result).toBe("string");
   }, 30000);
 
-  test.skip("should stream text", async () => {
-    // Skip - Vercel AI SDK v6 AI Gateway issue with DashScope
+  test("should stream text", async () => {
     const chunks: string[] = [];
     for await (const chunk of llmService.streamText("Say 'hello'")) {
       chunks.push(chunk);
