@@ -159,18 +159,24 @@ class ChatEngine {
     }
 
     const toolDescriptions = [
-      "- web_fetch: 获取指定 URL 的网页内容。用于总结网页、公众号文章等。",
-      "- web_search: 搜索互联网信息。",
-      "- read_file: 读取文件内容。",
-      "- write_file: 写入文件。",
-      "- edit_file: 编辑文件。",
-      "- bash: 执行 shell 命令。",
-      "- glob: 搜索文件。",
-      "- grep: 搜索文件内容。",
+      "## 可用工具 (请使用 Tool Calling 方式调用)",
+      "",
+      "当需要获取网页内容时，必须使用 web_fetch 工具：",
+      "- web_fetch(url: string): 获取 URL 内容并总结",
+      "",
+      "其他工具：",
+      "- web_search(query: string): 搜索互联网",
+      "- read_file(path: string): 读取文件",
+      "- write_file(path: string, content: string): 写入文件",
+      "- edit_file(path: string, oldString: string, newString: string): 编辑文件",
+      "- bash(command: string): 执行命令",
+      "- glob(pattern: string): 搜索文件",
+      "- grep(query: string, path?: string): 搜索内容",
+      "",
+      "重要：用户发送 URL 时，必须调用 web_fetch 工具获取内容。不要询问用户，自己决定并调用工具。",
     ].join("\n");
 
-    prompt += `\n\nAvailable tools:\n${toolDescriptions}`;
-    prompt += `\n\n重要：当用户发送 URL 时，你应该自动使用 web_fetch 工具获取内容并总结。不需要询问用户。`;
+    prompt += `\n\n${toolDescriptions}`;
 
     if (user && (user as { name?: string }).name) {
       prompt += `\n\nUser's name: ${(user as { name: string }).name}`;
