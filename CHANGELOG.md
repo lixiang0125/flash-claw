@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+### Chat Engine 集成 (2026-03-02)
+
+**改造点**:
+- 简化 Chat Engine，保留核心功能
+- 修复 LangChain API 兼容性问题
+- 修复解析工具调用和记忆功能的 bug
+
 ### Phase 1 重构 - 集成 (2026-03-02)
 
 **改造点**:
