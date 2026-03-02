@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+### Phase 1 重构 - DI 容器 (2026-03-02)
+
+**目的**: 按照技术方案重构基础骨架，实现 Phase 1 目标
+
+**改造点**:
+- 实现 Token-based DI 容器 (Container, ScopedContainer)
+- 支持三种生命周期: Singleton, Transient, Scoped
+- 实现 TypedEventBus 事件总线
+- 实现 Bootstrap 启动引导和异步初始化
+- 预定义服务令牌: CONFIG, LOGGER, EVENT_BUS, DATABASE
+- 添加单元测试
+
 ### Heartbeat 心跳系统升级 (2026-03-02)
 
 **目的**: 改进心跳系统，使其能真正检测问题并通知用户
