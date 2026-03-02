@@ -1,5 +1,4 @@
-import { generateText } from "ai";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import OpenAI from "openai";
 import { listSkills, type Skill } from "../skills";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
@@ -13,34 +12,39 @@ const MAX_STEPS = 10;
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
-  toolCallId?: string;
+  tool_call_id?: string;
   toolName?: string;
+  name?: string;
+}
+
+interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
 }
 
 class ChatEngine {
-  private model: ReturnType<typeof createOpenAICompatible>;
+  private client: OpenAI;
   private sessions: Map<string, ChatMessage[]> = new Map();
   private sessionSkills: Map<string, Skill[]> = new Map();
-  private tools: Map<string, unknown> = new Map();
+  private tools: any[] = [];
   private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
 
   constructor() {
-    const modelName = process.env.MODEL || "qwen-plus";
     const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
     const apiKey = process.env.OPENAI_API_KEY || "";
 
-    console.log("Using model:", modelName);
-    console.log("Using baseURL:", baseURL);
+    console.log("Using OpenAI SDK, baseURL:", baseURL);
 
-    this.model = createOpenAICompatible({
-      name: "dashscope",
+    this.client = new OpenAI({
       baseURL,
       apiKey,
     });
   }
 
-  setTools(tools: unknown): void {
-    this.tools = tools as any;
+  setTools(tools: any[]): void {
+    this.tools = tools;
+    console.log("[DEBUG] setTools:", tools.length);
   }
 
   setToolExecutor(executor: (name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>): void {
@@ -60,7 +64,7 @@ class ChatEngine {
       
       const messages: any[] = [
         { role: "system", content: systemPrompt },
-        ...history.map((h: any) => ({ role: h.role, content: h.content })),
+        ...history,
         { role: "user", content: message },
       ];
 
@@ -70,29 +74,40 @@ class ChatEngine {
       while (iterations < MAX_STEPS) {
         iterations++;
 
-        const aiTools = Array.isArray(this.tools) && this.tools.length > 0 ? this.tools : undefined;
-        
-        console.log("[DEBUG] tools:", aiTools ? `(${aiTools.length} tools)` : "none");
+        console.log("[DEBUG] iteration:", iterations, "tools:", this.tools.length);
 
-        const result = await generateText({
-          model: this.model.chatModel(process.env.MODEL || "qwen-plus"),
-          messages: messages as any,
-          tools: aiTools as any,
+        const response = await this.client.chat.completions.create({
+          model: process.env.MODEL || "qwen-plus",
+          messages,
+          tools: this.tools.length > 0 ? this.tools : undefined,
+          temperature: 0.7,
         });
 
-        const text = result.text;
+        const assistantMsg = response.choices[0]?.message;
+        const text = assistantMsg?.content || "";
         lastResponse = text;
 
-        console.log("[DEBUG] toolCalls:", result.toolCalls?.length || 0);
-        console.log("[DEBUG] raw tool calls:", JSON.stringify(result.toolCalls).substring(0, 500));
+        console.log("[DEBUG] assistant content:", text.substring(0, 100));
+        console.log("[DEBUG] tool_calls:", assistantMsg?.tool_calls?.length || 0);
 
-        messages.push({ role: "assistant", content: text });
+        if (!assistantMsg?.tool_calls || assistantMsg.tool_calls.length === 0) {
+          messages.push({ role: "assistant", content: text });
+          break;
+        }
 
-        for (const toolCall of result.toolCalls) {
-          const toolName = toolCall.toolName;
-          const args = ((toolCall as any).args as Record<string, unknown>) || {};
+        messages.push({
+          role: "assistant",
+          content: text,
+          tool_calls: assistantMsg.tool_calls,
+        });
 
-          let toolResult = { result: null as unknown, error: "Tool executor not configured" } as { result: unknown; error: string };
+        for (const tc of assistantMsg.tool_calls!) {
+          const toolName = (tc as any).function.name;
+          const args = JSON.parse((tc as any).function.arguments || "{}");
+
+          console.log("[TOOL_CALL]", toolName, JSON.stringify(args).substring(0, 100));
+
+          let toolResult: any = { result: null, error: "Tool executor not configured" };
 
           if (this.toolExecutor) {
             try {
@@ -102,13 +117,13 @@ class ChatEngine {
             }
           }
 
-          const resultContent = toolResult.error || JSON.stringify(toolResult.result);
+          console.log("[TOOL_RESULT]", toolName, toolResult.error ? `ERROR: ${toolResult.error}` : "OK");
 
           messages.push({
             role: "tool",
-            content: resultContent,
-            toolCallId: toolCall.toolCallId,
-            toolName,
+            content: toolResult.error || JSON.stringify(toolResult.result),
+            tool_call_id: tc.id,
+            name: toolName,
           });
         }
 
