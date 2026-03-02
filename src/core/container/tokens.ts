@@ -125,3 +125,108 @@ export interface ToolExecutor {
 
 export const TOOL_EXECUTOR: ServiceToken<ToolExecutor> =
   createToken<ToolExecutor>("TOOL_EXECUTOR");
+
+// ===== Phase 3: Memory System =====
+
+export interface IEmbeddingService {
+  embed(text: string): Promise<number[]>;
+  embedBatch(texts: string[]): Promise<number[][]>;
+  readonly dimensions: number;
+  readonly providerName: string;
+  readonly isReady: boolean;
+  initialize(): Promise<void>;
+}
+
+export const EMBEDDING_SERVICE: ServiceToken<IEmbeddingService> =
+  createToken<IEmbeddingService>("EMBEDDING_SERVICE");
+
+export interface IVectorStore {
+  initialize(): Promise<void>;
+  insert(
+    id: string,
+    content: string,
+    type: string,
+    embedding: number[] | null,
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
+  searchVector(
+    queryEmbedding: number[],
+    limit: number,
+    threshold?: number,
+  ): Promise<Array<{ id: string; score: number }>>;
+  searchFTS(query: string, limit: number): Promise<Array<{ id: string; score: number }>>;
+  searchHybrid(
+    queryEmbedding: number[] | null,
+    queryText: string,
+    limit: number,
+    threshold?: number,
+  ): Promise<Array<{ id: string; score: number }>>;
+  delete(id: string): Promise<void>;
+}
+
+export const VECTOR_STORE: ServiceToken<IVectorStore> =
+  createToken<IVectorStore>("VECTOR_STORE");
+
+export interface IWorkingMemory {
+  append(sessionId: string, message: unknown): void;
+  getMessages(sessionId: string): unknown[];
+  getRecent(sessionId: string, count: number): unknown[];
+  clear(sessionId: string): void;
+}
+
+export const WORKING_MEMORY: ServiceToken<IWorkingMemory> =
+  createToken<IWorkingMemory>("WORKING_MEMORY");
+
+export interface IShortTermMemory {
+  initialize(): void;
+  upsertSession(sessionId: string, userId: string, platform: string, metadata?: unknown): void;
+  saveMessage(sessionId: string, message: unknown): string;
+  getHistory(sessionId: string, limit?: number, beforeTimestamp?: number): unknown[];
+}
+
+export const SHORT_TERM_MEMORY: ServiceToken<IShortTermMemory> =
+  createToken<IShortTermMemory>("SHORT_TERM_MEMORY");
+
+export interface ILonTermMemory {
+  store(entry: unknown): Promise<string>;
+  recall(query: unknown): Promise<unknown[]>;
+}
+
+export const LONG_TERM_MEMORY: ServiceToken<ILonTermMemory> =
+  createToken<ILonTermMemory>("LONG_TERM_MEMORY");
+
+export interface IUserProfile {
+  getProfile(userId: string): Promise<unknown>;
+  updateProfile(userId: string, updates: unknown): Promise<void>;
+}
+
+export const USER_PROFILE: ServiceToken<IUserProfile> =
+  createToken<IUserProfile>("USER_PROFILE");
+
+export interface IMemoryManager {
+  store(entry: unknown): Promise<string>;
+  recall(query: unknown): Promise<unknown[]>;
+  storeInteraction(msg: unknown, response: string): Promise<void>;
+  getUserProfile(userId: string): Promise<unknown>;
+  updateUserProfile(userId: string, updates: unknown): Promise<void>;
+}
+
+export const MEMORY_MANAGER: ServiceToken<IMemoryManager> =
+  createToken<IMemoryManager>("MEMORY_MANAGER");
+
+export interface IContextBudget {
+  getAllocations(): Record<string, number>;
+  estimateTokens(text: string): number;
+  truncateHistory(messages: unknown[], maxTokens: number): unknown[];
+}
+
+export const CONTEXT_BUDGET: ServiceToken<IContextBudget> =
+  createToken<IContextBudget>("CONTEXT_BUDGET");
+
+export interface IPromptBuilder {
+  build(context: unknown, userMessage: string): Promise<unknown[]>;
+  estimateTokens(messages: unknown[]): number;
+}
+
+export const PROMPT_BUILDER: ServiceToken<IPromptBuilder> =
+  createToken<IPromptBuilder>("PROMPT_BUILDER");

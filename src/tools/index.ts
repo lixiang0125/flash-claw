@@ -650,7 +650,6 @@ async function getFeishuClient() {
   feishuClient = new Lark.Client({
     appId: process.env.FEISHU_APP_ID,
     appSecret: process.env.FEISHU_APP_SECRET,
-    logLevel: LogLevel.WARN,
   });
   
   return feishuClient;

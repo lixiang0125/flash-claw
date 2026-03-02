@@ -26,7 +26,7 @@ export interface TaskRun {
 }
 
 class TaskScheduler {
-  private db: ReturnType<Database>;
+  private db: InstanceType<typeof Database>;
   private timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private lastChatId: string | null = null;
 
@@ -88,16 +88,17 @@ class TaskScheduler {
   }
 
   createTask(task: Omit<Task, "id" | "createdAt" | "lastRun" | "nextRun">): Task {
-    const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const nextRun = this.calculateNextRun(task.schedule);
+    const nextRunFromCalc = this.calculateNextRun(task.schedule);
+    const nextRun = nextRunFromCalc ?? undefined;
     const now = new Date().toISOString();
+    const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
     this.db.prepare(`
       INSERT INTO tasks (id, name, message, schedule, enabled, next_run, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, task.name, task.message, task.schedule, task.enabled ? 1 : 0, nextRun, now);
+    `).run(id, task.name, task.message, task.schedule, task.enabled ? 1 : 0, nextRun ?? null, now);
     
-    if (task.enabled) {
+    if (task.enabled && nextRun) {
       this.scheduleTask(id, nextRun);
     }
     
@@ -236,7 +237,7 @@ class TaskScheduler {
         try {
           const lastChatId = this.getLastChatId();
           if (lastChatId) {
-            await feishuBot.sendMessage(lastChatId, undefined, `⏰ 任务提醒: ${result.response}`);
+            await feishuBot.notify(lastChatId, `⏰ 任务提醒: ${result.response}`);
           }
         } catch (e) {
           console.error("[TaskScheduler] Failed to send to Feishu:", e);
@@ -245,7 +246,10 @@ class TaskScheduler {
 
       if (task.enabled) {
         this.cancelTask(id);
-        this.scheduleTask(id, nextRun);
+        const newNextRun = this.calculateNextRun(task.schedule);
+        if (newNextRun) {
+          this.scheduleTask(id, newNextRun);
+        }
       }
 
       return {

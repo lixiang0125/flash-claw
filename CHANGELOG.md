@@ -2,19 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
-### Phase 2 - 工具与执行层 (2026-03-03)
+### 记忆系统 (2026-03-03)
 
 **改造点**:
-- ToolRegistry 工具注册中心
-- SandboxManager 沙箱管理器（本地 + Docker 模式）
-- DockerSandboxManager (容器池、预热、回收)
-- ToolExecutor 工具执行生命周期
-- SecurityLayer 安全层（路径白名单、命令黑名单、限流、审计）
-- 8 个内置工具: read_file, write_file, edit_file, bash, glob, grep, web_fetch, web_search
-- WebFetch 升级: SSRF 防护 + Playwright 回退 + 缓存
-- **Chat Engine 重构: 使用 OpenAI SDK + Qwen Function Calling**
-- **修复 web_fetch 工具在 Bun 运行时的问题 (Node 全局变量)**
-- **修复工具输出格式，确保模型能正确接收工具返回内容**
+- WorkingMemory: 纯内存工作记忆，当前对话窗口
+- ShortTermMemory: SQLite 会话级记忆，24小时自动过期
+- LongTermMemory: 向量语义检索，跨会话永久记忆
+- LocalEmbeddingService: 本地嵌入服务 (Transformers.js / Ollama)
+- VectorStore: sqlite-vec 向量存储 + FTS5 全文搜索混合检索
+- MemoryManager: 三级记忆统一入口
+- ContextBudget: 上下文预算管理，控制 Token 在 20K 以内
+- UserProfile: 用户画像系统
+- PromptBuilder: 预算感知的上下文组装器
+
+**技术特性**:
+- 本地嵌入模型，数据不出本地
+- sqlite-vec 向量搜索 + FTS5 混合检索
+- 记忆综合排序: semantic×0.5 + recency×0.3 + importance×0.2
+- 时间衰减公式（一周半衰期）
+- 事实提取和去重
+
+**新增依赖**:
+- @xenova/transformers: 本地嵌入模型
+- sqlite-vec: 向量搜索扩展
 
 ### LLM Service 切换到 Vercel AI SDK (2026-03-02)
 

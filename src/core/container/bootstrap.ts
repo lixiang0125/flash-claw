@@ -11,6 +11,15 @@ import {
   SANDBOX_MANAGER,
   TOOL_REGISTRY,
   TOOL_EXECUTOR,
+  EMBEDDING_SERVICE,
+  VECTOR_STORE,
+  WORKING_MEMORY,
+  SHORT_TERM_MEMORY,
+  LONG_TERM_MEMORY,
+  USER_PROFILE,
+  MEMORY_MANAGER,
+  CONTEXT_BUDGET,
+  PROMPT_BUILDER,
   type AppConfig,
   type Logger,
   type Database,
@@ -20,6 +29,12 @@ import {
   type SandboxManager,
   type ToolRegistry as IToolRegistry,
   type ToolExecutor as IToolExecutor,
+  type IEmbeddingService,
+  type IVectorStore,
+  type ILonTermMemory,
+  type IMemoryManager,
+  type IPromptBuilder,
+  type IContextBudget,
 } from "./tokens";
 import { TypedEventBus } from "./event-bus";
 import { createLLMService } from "./llm-service";
@@ -261,6 +276,142 @@ export function createContainer(): Container {
         sandboxManager as any,
         securityLayer,
         logger
+      );
+    },
+  });
+
+  // ===== Phase 3: Memory System =====
+
+  // 嵌入服务
+  container.register({
+    token: EMBEDDING_SERVICE,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const mainDb = resolver.resolve(DATABASE);
+      const { TransformersEmbeddingProvider, OllamaEmbeddingProvider, EmbeddingService } = require("../../memory/embedding");
+      const providers = [
+        new TransformersEmbeddingProvider(),
+        new OllamaEmbeddingProvider(),
+      ];
+      const service = new EmbeddingService(providers, mainDb as any, logger);
+      service.initialize();
+      return service;
+    },
+  });
+
+  // 向量存储
+  container.register({
+    token: VECTOR_STORE,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const mainDb = resolver.resolve(DATABASE);
+      const { VectorStore } = require("../../memory/vector-store");
+      const store = new VectorStore(mainDb as any, logger, { dimensions: 384 });
+      store.initialize();
+      return store;
+    },
+  });
+
+  // 工作记忆
+  container.register({
+    token: WORKING_MEMORY,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const { WorkingMemory } = require("../../memory/working-memory");
+      return new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
+    },
+  });
+
+  // 短期记忆
+  container.register({
+    token: SHORT_TERM_MEMORY,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const mainDb = resolver.resolve(DATABASE);
+      const { ShortTermMemory } = require("../../memory/short-term-memory");
+      const stm = new ShortTermMemory(mainDb as any);
+      stm.initialize();
+      return stm;
+    },
+  });
+
+  // 长期记忆
+  container.register({
+    token: LONG_TERM_MEMORY,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const mainDb = resolver.resolve(DATABASE);
+      const vectorStore = resolver.resolve(VECTOR_STORE);
+      const embeddingService = resolver.resolve(EMBEDDING_SERVICE);
+      const { LongTermMemory } = require("../../memory/long-term-memory");
+      return new LongTermMemory(
+        vectorStore as any,
+        embeddingService as any,
+        mainDb as any,
+        logger,
+      );
+    },
+  });
+
+  // 用户画像
+  container.register({
+    token: USER_PROFILE,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const mainDb = resolver.resolve(DATABASE);
+      const { UserProfileService } = require("../../memory/user-profile");
+      return new UserProfileService(mainDb as any, logger);
+    },
+  });
+
+  // 记忆管理器
+  container.register({
+    token: MEMORY_MANAGER,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const workingMemory = resolver.resolve(WORKING_MEMORY);
+      const shortTermMemory = resolver.resolve(SHORT_TERM_MEMORY);
+      const longTermMemory = resolver.resolve(LONG_TERM_MEMORY);
+      const userProfile = resolver.resolve(USER_PROFILE);
+      const { MemoryManager } = require("../../memory/memory-manager");
+      return new MemoryManager(
+        workingMemory as any,
+        shortTermMemory as any,
+        longTermMemory as any,
+        userProfile as any,
+        logger,
+      );
+    },
+  });
+
+  // 上下文预算
+  container.register({
+    token: CONTEXT_BUDGET,
+    lifecycle: Lifecycle.Singleton,
+    factory: () => {
+      const { ContextBudget } = require("../../memory/context-budget");
+      return new ContextBudget();
+    },
+  });
+
+  // PromptBuilder
+  container.register({
+    token: PROMPT_BUILDER,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const contextBudget = resolver.resolve(CONTEXT_BUDGET);
+      const memoryManager = resolver.resolve(MEMORY_MANAGER);
+      const { PromptBuilder } = require("../../agent/prompt-builder");
+      return new PromptBuilder(
+        contextBudget as any,
+        memoryManager as any,
+        logger,
       );
     },
   });

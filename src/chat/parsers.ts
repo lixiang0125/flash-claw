@@ -23,7 +23,7 @@ export function parseTaskFromMessage(message: string): ParsedTask | null {
   
   // 一次性任务：X分钟后/小时后/天后（不带"每"字）
   if (minuteMatch) {
-    const minutes = parseInt(minuteMatch[1]);
+    const minutes = parseInt(minuteMatch[1] ?? "0", 10);
     const executeAfter = minutes * 60 * 1000; // 转换为毫秒
     return {
       name: `${minutes}分钟后提醒`,
@@ -34,7 +34,7 @@ export function parseTaskFromMessage(message: string): ParsedTask | null {
   }
   
   if (hourMatch) {
-    const hours = parseInt(hourMatch[1]);
+    const hours = parseInt(hourMatch[1] ?? "0", 10);
     const executeAfter = hours * 60 * 60 * 1000;
     return {
       name: `${hours}小时后提醒`,
@@ -45,7 +45,7 @@ export function parseTaskFromMessage(message: string): ParsedTask | null {
   }
   
   if (dayMatch) {
-    const days = parseInt(dayMatch[1]);
+    const days = parseInt(dayMatch[1] ?? "0", 10);
     const executeAfter = days * 24 * 60 * 60 * 1000;
     return {
       name: `${days}天后提醒`,
@@ -61,7 +61,7 @@ export function parseTaskFromMessage(message: string): ParsedTask | null {
     const everyHourMatch = message.match(/每\s*(\d+)\s*小时/);
     
     if (everyMinuteMatch) {
-      const minutes = parseInt(everyMinuteMatch[1]);
+      const minutes = parseInt(everyMinuteMatch[1] ?? "0", 10);
       return {
         name: `每${minutes}分钟提醒`,
         message: extractTaskContent(message),
@@ -71,7 +71,7 @@ export function parseTaskFromMessage(message: string): ParsedTask | null {
     }
     
     if (everyHourMatch) {
-      const hours = parseInt(everyHourMatch[1]);
+      const hours = parseInt(everyHourMatch[1] ?? "0", 10);
       return {
         name: `每${hours}小时提醒`,
         message: extractTaskContent(message),
@@ -82,7 +82,7 @@ export function parseTaskFromMessage(message: string): ParsedTask | null {
     
     if (lowerMessage.includes("每天") || lowerMessage.includes("每天早上") || lowerMessage.includes("每天晚上")) {
       const hourMatch2 = message.match(/(?:早上|晚上|上午|下午)?\s*(\d{1,2})\s*点/);
-      const hour = hourMatch2 ? parseInt(hourMatch2[1]) : 8;
+      const hour = hourMatch2 ? parseInt(hourMatch2[1] ?? "0", 10) : 8;
       return {
         name: `每天${hour}点提醒`,
         message: extractTaskContent(message),
@@ -120,7 +120,7 @@ export function cronToHumanReadable(cron: string): string {
 
   const [minute, hour, day, month, week] = parts;
 
-  if (minute.startsWith("*/")) {
+  if (minute && minute.startsWith("*/")) {
     const interval = minute.slice(2);
     if (hour === "*" && day === "*" && month === "*" && week === "*") {
       return `每 ${interval} 分钟`;
@@ -131,8 +131,8 @@ export function cronToHumanReadable(cron: string): string {
     return "每分钟";
   }
 
-  if (minute.match(/^\d+$/) && hour.match(/^\d+$/)) {
-    return `每天 ${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+  if (minute && hour && minute.match(/^\d+$/) && hour.match(/^\d+$/)) {
+    return `每天 ${(hour ?? "00").padStart(2, "0")}:${minute.padStart(2, "0")}`;
   }
 
   return cron;
@@ -173,9 +173,12 @@ export function parseToolCalls(response: any): { tool: string; args: Record<stri
     const matches = response.matchAll(pattern);
     for (const match of matches) {
       try {
+        const toolName = match[1];
+        const toolArgs = match[2];
+        if (!toolName || !toolArgs) continue;
         toolCalls.push({
-          tool: match[1],
-          args: JSON.parse(match[2]),
+          tool: toolName,
+          args: JSON.parse(toolArgs),
         });
       } catch {
         // Continue to next pattern

@@ -28,7 +28,7 @@ interface HealthCheckResult {
 }
 
 class HeartbeatSystem {
-  private db: ReturnType<Database>;
+  private db: InstanceType<typeof Database>;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private heartbeatFile: string;
 
@@ -93,15 +93,15 @@ class HeartbeatSystem {
 
       const everyMatch = trimmed.match(/(.+):\s*every\s+(\d+)\s*min/i);
       if (everyMatch) {
-        const name = everyMatch[1].trim();
-        const interval = parseInt(everyMatch[2]);
+        const name = (everyMatch[1] ?? "").trim();
+        const interval = parseInt(everyMatch[2] ?? "0", 10);
 
         let timeWindow: { start: number; end: number } | undefined;
         const windowMatch = trimmed.match(/(\d+)-(\d+)/);
         if (windowMatch) {
           timeWindow = {
-            start: parseInt(windowMatch[1]),
-            end: parseInt(windowMatch[2]),
+            start: parseInt(windowMatch[1] ?? "0", 10),
+            end: parseInt(windowMatch[2] ?? "0", 10),
           };
         }
 
@@ -203,25 +203,6 @@ class HeartbeatSystem {
   }
 
   /**
-   * 执行所有需要的心跳检查
-   */
-  async tick(): Promise<HeartbeatResult[]> {
-    const checks = this.parseHeartbeatFile();
-    const results: HeartbeatResult[] = [];
-
-    for (const check of checks) {
-      if (this.shouldRun(check)) {
-        const result = await this.runCheck(check);
-        if (result) {
-          results.push(result);
-        }
-      }
-    }
-
-    return results;
-  }
-
-  /**
    * 启动心跳系统
    */
   start(intervalMinutes: number = 5): void {
@@ -306,7 +287,7 @@ class HeartbeatSystem {
     if (uptime < 60) {
       results.push({
         name: "服务器运行",
-        status: "info",
+        status: "ok",
         message: `服务器刚启动 (${Math.floor(uptime)}秒)`,
       });
     } else {
@@ -338,10 +319,11 @@ class HeartbeatSystem {
     const message = this.formatNotification(errorResults);
 
     try {
-      await feishuBot?.sendMessage?.(lastChatId, undefined, message);
+      await feishuBot?.notify?.(lastChatId, message);
       console.log("[Heartbeat] Notification sent to Feishu");
-    } catch (error: any) {
-      console.error("[Heartbeat] Failed to send notification:", error.message);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error("[Heartbeat] Failed to send notification:", errMsg);
     }
   }
 

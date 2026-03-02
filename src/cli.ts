@@ -50,7 +50,7 @@ async function cmdTasks(args: string[]) {
 
   const runIndex = args.indexOf("--run");
   if (runIndex !== -1 && args[runIndex + 1]) {
-    const id = parseInt(args[runIndex + 1]);
+    const id = args[runIndex + 1] ?? "0";
     await taskScheduler.runTask(id);
     console.log(`任务 ${id} 已触发执行`);
     process.exit(0);
@@ -75,7 +75,7 @@ async function cmdSkills(args: string[]) {
   const { listSkills, getSkill } = await import("./skills/index.js");
 
   if (args.length > 0) {
-    const skillName = args[0];
+    const skillName = args[0] ?? "";
     const skill = getSkill(skillName);
     if (!skill) {
       console.error(`Skill "${skillName}" 不存在`);
@@ -105,7 +105,7 @@ async function cmdSubAgents(args: string[]) {
 
   const killIndex = args.indexOf("--kill");
   if (killIndex !== -1 && args[killIndex + 1]) {
-    const runId = args[killIndex + 1];
+    const runId = args[killIndex + 1] ?? "";
     const success = subAgentSystem.killRun(runId);
     if (success) {
       console.log(`子智能体 ${runId} 已停止`);
@@ -117,9 +117,10 @@ async function cmdSubAgents(args: string[]) {
   }
 
   if (args.length > 0) {
-    const run = subAgentSystem.getRun(args[0]);
+    const runId = args[0] ?? "";
+    const run = subAgentSystem.getRun(runId);
     if (!run) {
-      console.error(`子智能体 ${args[0]} 不存在`);
+      console.error(`子智能体 ${runId} 不存在`);
       process.exit(1);
     }
     console.log(`# 子智能体 ${run.id}`);

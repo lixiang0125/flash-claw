@@ -154,9 +154,9 @@ class ChatEngine {
   }
 
   private loadContext(sessionId: string) {
-    const user = readUser(sessionId);
+    const user = readUser();
     const soul = readSoul();
-    const memory = readMemory(sessionId);
+    const memory = readMemory();
     return { user, soul, memory };
   }
 
@@ -212,11 +212,11 @@ class ChatEngine {
   private async parseAndScheduleTask(message: string, sessionId: string): Promise<string | null> {
     const task = parseTaskFromMessage(message);
     if (task) {
-      const schedule = task.cron || cronToHumanReadable(task.cron || "");
+      const schedule = task.schedule ? cronToHumanReadable(task.schedule) : "";
       await taskScheduler.createTask({
         name: task.name,
         message: task.message,
-        schedule,
+        schedule: task.schedule ?? "",
         enabled: true,
       });
       return `已创建任务: ${task.name} - ${schedule}`;
@@ -228,7 +228,7 @@ class ChatEngine {
         await taskScheduler.createTask({
           name: result.name,
           message: result.message,
-          schedule: result.schedule,
+          schedule: result.schedule ?? "",
           enabled: true,
         });
         return `已创建任务: ${result.name}`;

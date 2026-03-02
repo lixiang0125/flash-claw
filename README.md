@@ -107,6 +107,35 @@ AI 会记住用户的信息。包含三个文件：
 
 随着对话自动更新，不需要显式告诉 AI 更新。
 
+### 记忆系统 (Phase 3)
+
+三级记忆体系，使 Agent 具备"记住"和"理解上下文"的能力：
+
+- **WorkingMemory**: 纯内存工作记忆，当前对话窗口
+- **ShortTermMemory**: SQLite 会话级记忆，24小时自动过期
+- **LongTermMemory**: 向量语义检索，跨会话永久记忆
+
+**技术特性**:
+- 本地嵌入模型 (Transformers.js / Ollama)，数据不出本地
+- sqlite-vec 向量搜索 + FTS5 全文搜索混合检索
+- 上下文预算管理，控制 Token 在 20K 以内
+- 用户画像系统，持久化偏好设置
+
+```typescript
+// 使用示例
+const memoryManager = container.resolve(MEMORY_MANAGER);
+
+// 存储交互
+await memoryManager.storeInteraction(msg, response);
+
+// 语义检索记忆
+const memories = await memoryManager.recall({
+  text: "用户的编程偏好",
+  userId: "user123",
+  limit: 5,
+});
+```
+
 ### Heartbeat 心跳系统
 
 定期自动检查系统健康状态，发现问题时通过飞书通知用户：
@@ -272,11 +301,13 @@ flash-claw/
 ├── src/
 │   ├── index.ts              # Hono 服务入口
 │   ├── cli.ts                # CLI 命令行工具
+│   ├── agent/               # Agent 系统
+│   │   └── prompt-builder.ts # 提示词构建器
 │   ├── chat/                 # 对话引擎
 │   │   ├── engine.ts        # 聊天核心逻辑
 │   │   ├── parsers.ts       # 消息解析器
 │   │   ├── llm-parser.ts   # LLM 任务解析
-│   │   └── types.ts        # 类型定义
+│   │   └── types.ts         # 类型定义
 │   ├── core/                 # 核心基础设施
 │   │   ├── container/       # DI 容器
 │   │   │   ├── container.ts
@@ -287,16 +318,27 @@ flash-claw/
 │   │       ├── agent-core.ts
 │   │       ├── session-manager.ts
 │   │       └── tool-registry.ts
-│   ├── Skill 加载模块
-│   ├── skills/              # tools/               # 工具定义和执行器
-│   ├── memory/              # 记忆系统
+│   ├── memory/              # 记忆系统 (Phase 3)
+│   │   ├── working-memory.ts      # 工作记忆
+│   │   ├── short-term-memory.ts   # 短期记忆
+│   │   ├── long-term-memory.ts    # 长期记忆
+│   │   ├── memory-manager.ts       # 记忆管理器
+│   │   ├── context-budget.ts      # 上下文预算
+│   │   ├── user-profile.ts        # 用户画像
+│   │   ├── vector-store.ts        # 向量存储
+│   │   └── embedding/             # 嵌入服务
+│   │       ├── embedding-service.ts
+│   │       ├── transformers-provider.ts
+│   │       └── ollama-provider.ts
+│   ├── tools/               # 工具定义和执行器
+│   ├── skills/              # Skill 加载模块
 │   ├── profiles/            # 用户画像
 │   ├── tasks/               # 任务调度
 │   ├── heartbeat/           # 心跳系统
 │   ├── subagents/           # 子智能体
 │   ├── evolution/           # 自迭代进化
 │   ├── integrations/        # 第三方集成
-│   │   └── feishu.ts        # 飞书集成
+│   │   └── feishu.ts       # 飞书集成
 │   └── web/                 # React 前端
 │       ├── components/     # UI 组件
 │       ├── hooks/          # 业务逻辑

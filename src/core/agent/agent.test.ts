@@ -78,7 +78,8 @@ describe("SessionManager", () => {
 
     const messages = manager.getMessages("test-session");
     expect(messages.length).toBe(1);
-    expect(messages[0].content).toBe("Hello");
+    const firstMessage = messages[0];
+    expect(firstMessage?.content).toBe("Hello");
   });
 
   test("should clear session", () => {

@@ -15,7 +15,7 @@ export interface UserProfile {
 }
 
 class UserProfileStore {
-  private db: ReturnType<Database>;
+  private db: InstanceType<typeof Database>;
 
   constructor() {
     const dbPath = path.join(process.cwd(), "data", "profiles.db");

@@ -56,17 +56,14 @@ export class FeishuBot {
   private initWSClient(): void {
     if (!this.config.appId || !this.config.appSecret) return;
 
-    const sdkConfig: Lark.SDKConfig = {
+    const sdkConfig = {
       appId: this.config.appId,
       appSecret: this.config.appSecret,
-      domain: Lark.Domain.Feishu,
-      appType: Lark.AppType.SelfBuild,
+      domain: "feishu" as const,
+      appType: "self_build" as const,
     };
 
-    this.wsClient = new Lark.WSClient({
-      ...sdkConfig,
-      loggerLevel: Lark.LoggerLevel.debug,
-    });
+    this.wsClient = new Lark.WSClient(sdkConfig as any);
 
     console.log("Initializing Feishu WebSocket client...");
     console.log("App ID:", this.config.appId);
@@ -75,7 +72,7 @@ export class FeishuBot {
     const eventDispatcher = new Lark.EventDispatcher({});
     
     // 直接在 start 方法中注册
-    this.wsClient.start({
+    (this.wsClient as any).start({
       eventDispatcher: eventDispatcher.register({
         "im.message.receive_v1": async (data: any) => {
           console.log("Feishu: Received message event!");
@@ -175,7 +172,7 @@ export class FeishuBot {
     }
   }
 
-  private getSessionId(chatId: string, userId?: Lark.ImMessageSenderId): string {
+  private getSessionId(chatId: string, userId?: any): string {
     const userIdStr =
       userId?.user_id || userId?.open_id || userId?.union_id || "unknown";
     return `feishu_${chatId}_${userIdStr}`;
@@ -218,7 +215,7 @@ export class FeishuBot {
 
   private async sendMessage(
     chatId: string,
-    userId?: Lark.ImMessageSenderId,
+    userId?: any,
     text?: string
   ): Promise<void> {
     if (!text) return;
@@ -228,6 +225,10 @@ export class FeishuBot {
     } else if (this.config.appId && this.config.appSecret) {
       await this.sendViaAPI(chatId, text);
     }
+  }
+
+  async notify(chatId: string, text: string): Promise<void> {
+    await this.sendMessage(chatId, undefined, text);
   }
 
   private async addReaction(messageId: string, emojiType: string): Promise<void> {
@@ -286,11 +287,11 @@ export class FeishuBot {
       const client = new Lark.Client({
         appId: this.config.appId,
         appSecret: this.config.appSecret,
-        appType: Lark.AppType.SelfBuild,
-        domain: Lark.Domain.Feishu,
+        appType: "self_build" as any,
+        domain: "feishu" as any,
       });
 
-      const result = await client.im.message.create({
+      const result = await (client.im.message as any).create({
         params: {
           receive_id_type: "chat_id",
         },

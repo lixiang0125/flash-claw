@@ -56,7 +56,7 @@ const SKILLS_BASE_DIRS = findSkillsDirs();
  */
 function parseFrontmatter(content: string): { meta: SkillMeta; content: string } {
   const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!match) {
+  if (!match || !match[1] || !match[2]) {
     return {
       meta: { name: "", description: "" },
       content,
