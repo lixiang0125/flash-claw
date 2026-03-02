@@ -107,7 +107,7 @@ AI 会记住用户的信息。包含三个文件：
 
 随着对话自动更新，不需要显式告诉 AI 更新。
 
-### 记忆系统 (Phase 3)
+### 记忆系统
 
 三级记忆体系，使 Agent 具备"记住"和"理解上下文"的能力：
 
@@ -318,7 +318,7 @@ flash-claw/
 │   │       ├── agent-core.ts
 │   │       ├── session-manager.ts
 │   │       └── tool-registry.ts
-│   ├── memory/              # 记忆系统 (Phase 3)
+│   ├── memory/              # 记忆系统
 │   │   ├── working-memory.ts      # 工作记忆
 │   │   ├── short-term-memory.ts   # 短期记忆
 │   │   ├── long-term-memory.ts    # 长期记忆
