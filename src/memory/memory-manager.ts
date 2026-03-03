@@ -3,6 +3,8 @@ import { ShortTermMemory } from "./short-term-memory";
 import { LongTermMemory, type MemoryEntry, type MemoryQuery, type MemorySearchResult } from "./long-term-memory";
 import { UserProfileService, type UserProfile } from "./user-profile";
 import type { Logger } from "./embedding/embedding-service";
+import * as fs from "fs/promises";
+import * as path from "path";
 
 export interface IncomingMessage {
   sender: { id: string };
@@ -115,6 +117,9 @@ export class MemoryManager implements IMemoryManager {
       timestamp: Date.now(),
     });
 
+    await this.tryFlushIfNeeded(sessionId);
+    await this.saveToMarkdownIfNeeded(userText, response, sessionId);
+
     this.shortTermMemory.upsertSession(sessionId, userId, msg.platform);
     this.shortTermMemory.saveMessage(sessionId, {
       role: "user",
@@ -130,6 +135,43 @@ export class MemoryManager implements IMemoryManager {
     this.longTermMemory
       .extractAndStoreFacts(userText, response, userId, sessionId)
       .catch((err) => this.logger.error(`Fact extraction failed: ${err}`));
+  }
+
+  private async tryFlushIfNeeded(sessionId: string): Promise<void> {
+    try {
+      const flushed = await (this.workingMemory as any).tryFlush?.(sessionId);
+      if (flushed) {
+        this.logger.debug(`Pre-compaction flush triggered for session ${sessionId.slice(0, 8)}`);
+      }
+    } catch (err) {
+      this.logger.warn(`Flush check failed: ${err}`);
+    }
+  }
+
+  private async saveToMarkdownIfNeeded(userText: string, response: string, sessionId: string): Promise<void> {
+    const memoryKeywords = ["记住", "记住这个", "请记住", "帮我记住", "记得", "不要忘记", "记住我", "remember", "don't forget", "keep in mind"];
+    const shouldSave = memoryKeywords.some(kw => userText.toLowerCase().includes(kw.toLowerCase()));
+    
+    if (!shouldSave) return;
+
+    const workspacePath = process.env["WORKSPACE_PATH"] || "./data/workspace";
+    if (!workspacePath) return;
+
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const memoryDir = path.join(workspacePath, "memory");
+      await fs.mkdir(memoryDir, { recursive: true });
+      
+      const logPath = path.join(memoryDir, `${today}.md`);
+      const content = `\n## ${sessionId.slice(0, 8)} - ${new Date().toLocaleTimeString()}\n\n**用户**: ${userText}\n\n**记忆**: ${response}\n`;
+      
+      const existing = await fs.readFile(logPath, "utf-8").catch(() => `# ${today}\n`);
+      await fs.writeFile(logPath, existing + content);
+      
+      this.logger.info(`Saved memory to ${logPath}`);
+    } catch (err) {
+      this.logger.warn(`Failed to save markdown memory: ${err}`);
+    }
   }
 
   async getUserProfile(userId: string): Promise<UserProfile> {
