@@ -84,47 +84,35 @@ export function loadConfig(): AppConfig {
 }
 
 export function createLogger(config: AppConfig): Logger {
-  const levels = ["debug", "info", "warn", "error"] as const;
-  const currentLevelIndex = levels.indexOf(config.logLevel);
+  const pino = require("pino");
 
-  function shouldLog(level: (typeof levels)[number]): boolean {
-    return levels.indexOf(level) >= currentLevelIndex;
-  }
-
-  function formatMessage(
-    level: string,
-    message: string,
-    meta?: Record<string, unknown>,
-  ): string {
-    const timestamp = new Date().toISOString();
-    const metaStr = meta ? ` ${JSON.stringify(meta)}` : "";
-    return `[${timestamp}] [${level.toUpperCase()}] ${message}${metaStr}`;
-  }
+  const logger = pino({
+    level: config.logLevel,
+    transport: config.env === "development"
+      ? { target: "pino-pretty", options: { colorize: true } }
+      : undefined,
+    serializers: {
+      err: pino.stdSerializers.err,
+    },
+  });
 
   function createLoggerInstance(context: Record<string, unknown> = {}): Logger {
+    const child = logger.child(context);
     return {
       debug(message: string, meta?: Record<string, unknown>) {
-        if (shouldLog("debug")) {
-          console.debug(
-            formatMessage("debug", message, { ...context, ...meta }),
-          );
-        }
+        child.debug(meta, message);
       },
       info(message: string, meta?: Record<string, unknown>) {
-        if (shouldLog("info")) {
-          console.info(formatMessage("info", message, { ...context, ...meta }));
-        }
+        child.info(meta, message);
       },
       warn(message: string, meta?: Record<string, unknown>) {
-        if (shouldLog("warn")) {
-          console.warn(formatMessage("warn", message, { ...context, ...meta }));
-        }
+        child.warn(meta, message);
       },
       error(message: string, meta?: Record<string, unknown>) {
-        if (shouldLog("error")) {
-          console.error(
-            formatMessage("error", message, { ...context, ...meta }),
-          );
+        if (meta?.err) {
+          child.error(meta, message);
+        } else {
+          child.error(meta, message);
         }
       },
       child(childContext: Record<string, unknown>): Logger {

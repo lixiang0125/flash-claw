@@ -10,7 +10,10 @@
     "dev": "bun run --watch src/index.ts",
     "build:web": "bun run scripts/build-web.ts",
     "start": "bun run src/index.ts",
-    "release": "bun run scripts/release.ts"
+    "release": "bun run scripts/release.ts",
+    "test": "bun test",
+    "test:run": "bun test --run",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -36,6 +39,8 @@
     "hono": "^4.12.3",
     "jsdom": "^28.1.0",
     "openai": "^6.25.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^12.0.0",
     "playwright": "^1.58.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

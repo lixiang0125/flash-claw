@@ -32,6 +32,7 @@ export interface SubAgentRun {
 
 class SubAgentSystem {
   private runs: Map<string, SubAgentRun> = new Map();
+  private abortControllers = new Map<string, AbortController>();
   private maxConcurrent = 8;
   private maxSpawnDepth = 1;
   private maxChildrenPerAgent = 5;
@@ -39,6 +40,8 @@ class SubAgentSystem {
   async spawn(config: SubAgentConfig, parentSessionId: string): Promise<{ status: string; runId: string; childSessionKey: string }> {
     const runId = generateId();
     const childSessionId = `subagent:${runId}`;
+    const controller = new AbortController();
+    this.abortControllers.set(runId, controller);
 
     const run: SubAgentRun = {
       id: runId,
@@ -52,7 +55,7 @@ class SubAgentSystem {
 
     this.runs.set(runId, run);
 
-    this.executeSubAgent(run, config).catch(console.error);
+    this.executeSubAgent(run, config, controller.signal).catch(console.error);
 
     return {
       status: "accepted",
@@ -61,12 +64,32 @@ class SubAgentSystem {
     };
   }
 
-  private async executeSubAgent(run: SubAgentRun, config: SubAgentConfig): Promise<void> {
+  private async executeSubAgent(run: SubAgentRun, config: SubAgentConfig, signal: AbortSignal): Promise<void> {
     try {
-      const result = await chatEngine.chat({
-        message: run.task,
-        sessionId: run.sessionId,
-      });
+      const timeoutMs = config.runTimeoutSeconds ? config.runTimeoutSeconds * 1000 : undefined;
+      
+      const result = await Promise.race([
+        chatEngine.chat({
+          message: run.task,
+          sessionId: run.sessionId,
+        }),
+        new Promise<never>((_, reject) => {
+          if (signal.aborted) {
+            reject(new Error("Aborted"));
+            return;
+          }
+          signal.addEventListener("abort", () => {
+            reject(new Error("Aborted"));
+          });
+          if (timeoutMs) {
+            setTimeout(() => reject(new Error("Timeout")), timeoutMs);
+          }
+        }),
+      ]);
+
+      if (signal.aborted) {
+        throw new Error("Aborted");
+      }
 
       run.status = "completed";
       run.result = result.response;
@@ -77,14 +100,21 @@ class SubAgentSystem {
 
       this.announceToParent(run);
     } catch (error) {
-      run.status = "failed";
-      run.error = error instanceof Error ? error.message : "Unknown error";
+      if (error instanceof Error && error.message === "Aborted") {
+        run.status = "failed";
+        run.error = "Killed by user";
+      } else {
+        run.status = "failed";
+        run.error = error instanceof Error ? error.message : "Unknown error";
+      }
       run.finishedAt = new Date();
       run.runtime = this.formatRuntime(run.startedAt, run.finishedAt);
 
       this.runs.set(run.id, run);
 
       this.announceToParent(run);
+    } finally {
+      this.abortControllers.delete(run.id);
     }
   }
 
@@ -130,6 +160,11 @@ class SubAgentSystem {
   killRun(runId: string): boolean {
     const run = this.runs.get(runId);
     if (!run) return false;
+
+    const controller = this.abortControllers.get(runId);
+    if (controller) {
+      controller.abort();
+    }
 
     run.status = "failed";
     run.error = "Killed by user";

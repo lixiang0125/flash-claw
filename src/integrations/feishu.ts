@@ -15,6 +15,7 @@ export class FeishuBot {
   private wsClient?: Lark.WSClient;
   private tenantAccessToken: string = "";
   private tokenExpireTime: number = 0;
+  private tokenRefreshPromise: Promise<string> | null = null;
 
   constructor() {
     this.config = {
@@ -186,10 +187,22 @@ export class FeishuBot {
       return this.tenantAccessToken;
     }
 
+    if (this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
+    }
+
     if (!this.config.appId || !this.config.appSecret) {
       throw new Error("Feishu app credentials not configured");
     }
 
+    this.tokenRefreshPromise = this.refreshToken().finally(() => {
+      this.tokenRefreshPromise = null;
+    });
+
+    return this.tokenRefreshPromise;
+  }
+
+  private async refreshToken(): Promise<string> {
     const response = await fetch(
       "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
       {

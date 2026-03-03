@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+### 架构治理与功能增强 (2026-03-03)
+
+**架构改进**:
+
+- **H-2**: 统一工具系统 - Zod-based 工具系统已启用
+- **H-3**: 建立测试框架 + CI/CD
+  - 添加 `bun test` 脚本
+  - 添加 GitHub Actions CI 工作流
+  - 创建 `.github/workflows/ci.yml`
+
+**功能增强**:
+
+- **M-12**: 引入 pino 结构化日志
+  - 使用 pino 替代自定义 logger
+  - 开发环境自动使用 pino-pretty
+
+- **M-13**: Feishu Token 并发保护
+  - 添加 tokenRefreshPromise 防止并发刷新
+
+- **M-1, M-2**: SubAgent AbortController 支持
+  - 添加 AbortController 支持取消子智能体
+  - killRun 现在真正中断执行
+
 ### 安全加固与 Bug 修复 (2026-03-03)
 
 **安全漏洞修复**:
