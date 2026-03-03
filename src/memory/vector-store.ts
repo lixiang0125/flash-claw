@@ -35,96 +35,19 @@ export interface VectorStoreConfig {
   dimensions: number;
   ftsWeight: number;
   vectorWeight: number;
+  enableMMR: boolean;
+  mmrLambda: number;
+  candidateMultiplier: number;
 }
 
 const DEFAULT_VECTOR_CONFIG: VectorStoreConfig = {
   dimensions: 384,
   ftsWeight: 0.3,
   vectorWeight: 0.7,
+  enableMMR: true,
+  mmrLambda: 0.7,
+  candidateMultiplier: 4,
 };
-
-const STOP_WORDS = new Set([
-  "的",
-  "了",
-  "在",
-  "是",
-  "我",
-  "有",
-  "和",
-  "就",
-  "不",
-  "人",
-  "都",
-  "一",
-  "一个",
-  "上",
-  "也",
-  "很",
-  "到",
-  "说",
-  "要",
-  "去",
-  "你",
-  "会",
-  "着",
-  "没有",
-  "看",
-  "好",
-  "自己",
-  "这",
-  "他",
-  "她",
-  "the",
-  "a",
-  "an",
-  "is",
-  "are",
-  "was",
-  "were",
-  "be",
-  "been",
-  "being",
-  "have",
-  "has",
-  "had",
-  "do",
-  "does",
-  "did",
-  "will",
-  "would",
-  "could",
-  "should",
-  "may",
-  "might",
-  "shall",
-  "can",
-  "and",
-  "but",
-  "or",
-  "not",
-  "no",
-  "nor",
-  "so",
-  "for",
-  "yet",
-  "to",
-  "of",
-  "in",
-  "on",
-  "at",
-  "by",
-  "with",
-  "from",
-  "as",
-  "it",
-  "its",
-  "this",
-  "that",
-  "these",
-  "those",
-  "i",
-  "me",
-]);
 
 export class VectorStore implements IVectorStore {
   private db: DatabaseService;
@@ -159,6 +82,8 @@ export class VectorStore implements IVectorStore {
     this.ensureTables();
   }
 
+  private contentCache = new Map<string, string>();
+
   async insert(
     id: string,
     content: string,
@@ -166,6 +91,7 @@ export class VectorStore implements IVectorStore {
     embedding: number[] | null,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
+    this.contentCache.set(id, content.slice(0, 200));
     this.db.run(
       `INSERT OR REPLACE INTO memories
         (id, content, type, user_id, session_id, timestamp, importance, access_count, last_accessed_at, metadata)
@@ -219,25 +145,26 @@ export class VectorStore implements IVectorStore {
   }
 
   async searchFTS(query: string, limit: number): Promise<VectorSearchResult[]> {
-    const processedQuery = this.processSearchQuery(query);
-    if (!processedQuery) return [];
+    const tokens = query.split(/[\s,，。！？、；：""''（）\[\]【]]+/).filter(t => t.length > 0);
+    
+    if (tokens.length === 0) return [];
 
+    const ftsQuery = tokens.map(t => `"${t}"`).join(" AND ");
+    
     const results = this.db.all<{ id: string; rank: number }>(
-      `SELECT id, rank
+      `SELECT id, bm25(memories_fts) as rank
        FROM memories_fts
        WHERE memories_fts MATCH ?
-       ORDER BY rank
+       ORDER BY rank ASC
        LIMIT ?`,
-      [processedQuery, limit],
+      [ftsQuery, limit],
     );
 
     if (results.length === 0) return [];
-    const firstResult = results[0];
-    const maxRank = firstResult ? Math.abs(firstResult.rank) : 0;
 
     return results.map((row) => ({
       id: row.id,
-      score: maxRank > 0 ? Math.abs(row.rank) / maxRank : 0,
+      score: 1 / (1 + Math.max(0, row.rank)),
     }));
   }
 
@@ -247,11 +174,13 @@ export class VectorStore implements IVectorStore {
     limit: number,
     threshold = 0.3,
   ): Promise<VectorSearchResult[]> {
+    const candidateLimit = limit * this.config.candidateMultiplier;
+
     const [vectorResults, ftsResults] = await Promise.all([
       queryEmbedding
-        ? this.searchVector(queryEmbedding, limit * 3, threshold)
+        ? this.searchVector(queryEmbedding, candidateLimit, threshold).catch(() => [])
         : Promise.resolve([]),
-      this.searchFTS(queryText, limit * 3),
+      this.searchFTS(queryText, candidateLimit).catch(() => []),
     ]);
 
     const scoreMap = new Map<string, number>();
@@ -263,13 +192,74 @@ export class VectorStore implements IVectorStore {
       scoreMap.set(r.id, (scoreMap.get(r.id) ?? 0) + r.score * this.config.ftsWeight);
     }
 
-    return Array.from(scoreMap.entries())
+    let mergedResults = Array.from(scoreMap.entries())
       .map(([id, score]) => ({ id, score }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+      .sort((a, b) => b.score - a.score);
+
+    if (this.config.enableMMR && mergedResults.length > 1) {
+      mergedResults = this.mmrRerank(mergedResults, limit, queryText);
+    }
+
+    return mergedResults.slice(0, limit);
+  }
+
+  private mmrRerank(
+    results: VectorSearchResult[],
+    limit: number,
+    query: string,
+  ): VectorSearchResult[] {
+    if (results.length <= limit) return results;
+
+    const selected: VectorSearchResult[] = [];
+    const remaining = [...results];
+    const lambda = this.config.mmrLambda;
+
+    selected.push(remaining.shift()!);
+
+    while (selected.length < limit && remaining.length > 0) {
+      let bestMmr = -Infinity;
+      let bestIdx = 0;
+
+      for (let i = 0; i < remaining.length; i++) {
+        const current = remaining[i];
+        if (!current) continue;
+        const relevance = current.score;
+        const maxSimilarity = Math.max(
+          0,
+          ...selected.map((s) => this.jaccardSimilarity(current.id, s.id)),
+        );
+        const mmr = lambda * relevance - (1 - lambda) * maxSimilarity;
+
+        if (mmr > bestMmr) {
+          bestMmr = mmr;
+          bestIdx = i;
+        }
+      }
+
+      const selectedItem = remaining.splice(bestIdx, 1)[0];
+      if (selectedItem) selected.push(selectedItem);
+    }
+
+    return selected;
+  }
+
+  private jaccardSimilarity(id1: string, id2: string): number {
+    const content1 = this.contentCache.get(id1) ?? "";
+    const content2 = this.contentCache.get(id2) ?? "";
+    
+    if (!content1 || !content2) return 0;
+    
+    const words1 = new Set(content1.toLowerCase().split(/\s+/));
+    const words2 = new Set(content2.toLowerCase().split(/\s+/));
+    
+    const intersection = new Set([...words1].filter((x) => words2.has(x)));
+    const union = new Set([...words1, ...words2]);
+    
+    return union.size === 0 ? 0 : intersection.size / union.size;
   }
 
   async delete(id: string): Promise<void> {
+    this.contentCache.delete(id);
     this.db.run("DELETE FROM memories WHERE id = ?", [id]);
     if (this.vecAvailable) {
       this.db.run("DELETE FROM memories_vec WHERE id = ?", [id]);
@@ -288,17 +278,6 @@ export class VectorStore implements IVectorStore {
       totalVectors: vecCount?.cnt ?? 0,
       vecAvailable: this.vecAvailable,
     };
-  }
-
-  private processSearchQuery(query: string): string {
-    const tokens = query
-      .replace(/[，。！？、；：""''（）\[\]【】]/g, " ")
-      .split(/\s+/)
-      .filter((t) => t.length > 1)
-      .filter((t) => !STOP_WORDS.has(t));
-
-    if (tokens.length === 0) return "";
-    return tokens.map((t) => `"${t}"`).join(" OR ");
   }
 
   private ensureTables(): void {

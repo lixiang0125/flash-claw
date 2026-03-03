@@ -11,6 +11,9 @@ export interface WorkingMemoryConfig {
   maxTokens: number;
   enableCompression: boolean;
   compressionThreshold: number;
+  memoryFlushEnabled: boolean;
+  memoryFlushSoftThreshold: number;
+  reserveTokensFloor: number;
 }
 
 const DEFAULT_WORKING_MEMORY_CONFIG: WorkingMemoryConfig = {
@@ -18,14 +21,66 @@ const DEFAULT_WORKING_MEMORY_CONFIG: WorkingMemoryConfig = {
   maxTokens: 30_000,
   enableCompression: true,
   compressionThreshold: 30,
+  memoryFlushEnabled: true,
+  memoryFlushSoftThreshold: 4000,
+  reserveTokensFloor: 20_000,
 };
+
+export type FlushCallback = (sessionId: string, recentMessages: ConversationMessage[]) => Promise<void>;
 
 export class WorkingMemory {
   private sessions = new Map<string, ConversationMessage[]>();
   private config: WorkingMemoryConfig;
+  private flushCallback: FlushCallback | null = null;
+  private compactionCount = new Map<string, number>();
+  private hasFlushedInCompaction = new Map<string, boolean>();
 
   constructor(config?: Partial<WorkingMemoryConfig>) {
     this.config = { ...DEFAULT_WORKING_MEMORY_CONFIG, ...config };
+  }
+
+  setFlushCallback(callback: FlushCallback): void {
+    this.flushCallback = callback;
+  }
+
+  shouldFlush(sessionId: string, totalTokens: number): boolean {
+    if (!this.config.memoryFlushEnabled) return false;
+    if (!this.flushCallback) return false;
+
+    const currentCompaction = this.compactionCount.get(sessionId) ?? 0;
+    const hasFlushed = this.hasFlushedInCompaction.get(sessionId) ?? false;
+
+    const threshold = this.config.maxTokens - this.config.reserveTokensFloor - this.config.memoryFlushSoftThreshold;
+
+    return totalTokens > threshold && !hasFlushed;
+  }
+
+  markFlushed(sessionId: string): void {
+    const current = this.compactionCount.get(sessionId) ?? 0;
+    this.compactionCount.set(sessionId, current);
+    this.hasFlushedInCompaction.set(sessionId, true);
+  }
+
+  incrementCompactionCount(sessionId: string): void {
+    const current = this.compactionCount.get(sessionId) ?? 0;
+    this.compactionCount.set(sessionId, current + 1);
+    this.hasFlushedInCompaction.set(sessionId, false);
+  }
+
+  async tryFlush(sessionId: string): Promise<boolean> {
+    if (!this.flushCallback) return false;
+
+    const messages = this.getMessages(sessionId);
+    const tokens = this.estimateTokens(messages);
+
+    if (this.shouldFlush(sessionId, tokens)) {
+      const recentMessages = this.getRecent(sessionId, 10);
+      await this.flushCallback(sessionId, recentMessages);
+      this.markFlushed(sessionId);
+      return true;
+    }
+
+    return false;
   }
 
   append(sessionId: string, message: ConversationMessage): void {
@@ -79,6 +134,9 @@ export class WorkingMemory {
   ): Promise<void> {
     const messages = this.getMessages(sessionId);
     if (messages.length < this.config.compressionThreshold) return;
+
+    await this.tryFlush(sessionId);
+    this.incrementCompactionCount(sessionId);
 
     const systemMsgs = messages.filter((m) => m.role === "system");
     const recentMsgs = messages.slice(-10);
