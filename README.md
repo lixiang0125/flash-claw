@@ -97,36 +97,62 @@ const container = await bootstrap();
 const chatEngine = container.resolve(CHAT_ENGINE);
 ```
 
-### 三级记忆体系
+### 记忆系统
 
-使 Agent 具备"记住"和"理解上下文"的能力：
+基于 OpenClaw 设计的四级记忆体系，让 Agent 具备跨会话持久化记忆能力：
 
-- **WorkingMemory**: 纯内存工作记忆，当前对话窗口
-- **ShortTermMemory**: SQLite 会话级记忆，30分钟自动过期
-- **LongTermMemory**: 向量语义检索 + FTS5 全文搜索，跨会话永久记忆
+| 层级 | 名称 | 存储位置 | 生命周期 |
+|------|------|----------|----------|
+| T0 | WorkingMemory | 内存 | 当前会话 |
+| T1 | ShortTermMemory | SQLite | 30分钟自动过期 |
+| T2 | LongTermMemory | SQLite 向量库 | 永久 |
+| T3 | MarkdownMemory | Markdown 文件 | 永久 |
 
-**技术特性**:
-- 本地嵌入模型 (Transformers.js / Ollama)，数据不出本地
-- sqlite-vec 向量搜索 + FTS5 全文搜索混合检索
-- 上下文预算管理，控制 Token 在 20K 以内
-- **混合搜索优化**: 并集设计 + BM25 归一化 + MMR 重排序
-- **预压缩刷写**: 上下文溢出前主动保存记忆到磁盘
-- **Markdown 文件存储**: 可审计、可版本控制的持久记忆
+**核心设计理念**：
 
-**配置选项**:
+- **文件即真相**：Markdown 文件是记忆的真实来源，数据库是派生索引，可随时重建
+- **优雅降级**：向量搜索失败 → 关键字搜索 → 用户仍可直接读取 Markdown 文件
+- **本地优先**：嵌入模型可选本地 Transformers.js / Ollama，数据不出本地
+
+**技术特性**：
+
+- **混合搜索**：向量相似度 + BM25 关键字搜索并集设计，权重分配 70%/30%
+- **MMR 重排序**：基于内容相似度保证结果多样性，避免重复
+- **预压缩刷写**：上下文溢出前自动保存对话到 `memory/YYYY-MM-DD.md`
+- **时间衰减**：新近记忆自然排名更高（半衰期可配置）
+
+**工作区结构**：
+```
+data/workspace/
+├── MEMORY.md              # 长期策划记忆（人名、偏好、决策）
+└── memory/
+    ├── 2026-03-04.md     # 今日对话日志
+    └── 2026-03-03.md     # 昨日对话日志
+```
+
+**配置选项**：
 ```typescript
 // 向量存储
 VectorStoreConfig {
   enableMMR: true,           // 启用 MMR 重排序
-  mmrLambda: 0.7,           // 相关性权重
-  candidateMultiplier: 4,   // 候选倍增
+  mmrLambda: 0.7,           // 相关性/多样性平衡
+  candidateMultiplier: 4,     // 候选倍增
+  vectorWeight: 0.7,          // 向量权重
+  ftsWeight: 0.3,            // 关键字权重
 }
 
 // 工作内存
 WorkingMemoryConfig {
-  memoryFlushEnabled: true,
-  memoryFlushSoftThreshold: 4000,
-  reserveTokensFloor: 20000,
+  memoryFlushEnabled: true,           // 启用预压缩刷写
+  memoryFlushSoftThreshold: 4000,      // 距上限触发阈值
+  reserveTokensFloor: 20000,           // 保留空间
+}
+
+// Markdown 存储
+MarkdownMemoryConfig {
+  workspacePath: "./data/workspace",
+  enableDailyLogs: true,
+  enableMemoryFile: true,
 }
 ```
 
