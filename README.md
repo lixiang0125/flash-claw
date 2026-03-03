@@ -111,14 +111,24 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 **核心设计理念**：
 
 - **文件即真相**：Markdown 文件是记忆的真实来源，数据库是派生索引，可随时重建
+- **LLM 自主判断**：不通过关键词判断什么该记住，由 LLM 决定（参考 OpenClaw 设计）
 - **优雅降级**：向量搜索失败 → 关键字搜索 → 用户仍可直接读取 Markdown 文件
 - **本地优先**：嵌入模型可选本地 Transformers.js / Ollama，数据不出本地
+
+**5 种记忆写入触发路径**（参考 OpenClaw）：
+
+| 触发路径 | 写入目标 | 说明 |
+|----------|----------|------|
+| 用户显式指令 | `MEMORY.md` | 用户说"记住这个" |
+| 对话自动记录 | `memory/YYYY-MM-DD.md` | 每次对话自动追加到当日日志 |
+| 预压缩刷写 | `memory/YYYY-MM-DD.md` | 上下文即将溢出时自动保存 |
+| 会话重置 | `sessions/` | `/new` 或会话结束时保存 |
+| 周期性综合 | `MEMORY.md` | 从日志提炼持久事实到长期记忆 |
 
 **技术特性**：
 
 - **混合搜索**：向量相似度 + BM25 关键字搜索并集设计，权重分配 70%/30%
 - **MMR 重排序**：基于内容相似度保证结果多样性，避免重复
-- **预压缩刷写**：上下文溢出前自动保存对话到 `memory/YYYY-MM-DD.md`
 - **时间衰减**：新近记忆自然排名更高（半衰期可配置）
 
 **工作区结构**：
@@ -136,16 +146,16 @@ data/workspace/
 VectorStoreConfig {
   enableMMR: true,           // 启用 MMR 重排序
   mmrLambda: 0.7,           // 相关性/多样性平衡
-  candidateMultiplier: 4,     // 候选倍增
-  vectorWeight: 0.7,          // 向量权重
-  ftsWeight: 0.3,            // 关键字权重
+  candidateMultiplier: 4,   // 候选倍增
+  vectorWeight: 0.7,         // 向量权重
+  ftsWeight: 0.3,           // 关键字权重
 }
 
 // 工作内存
 WorkingMemoryConfig {
   memoryFlushEnabled: true,           // 启用预压缩刷写
-  memoryFlushSoftThreshold: 4000,      // 距上限触发阈值
-  reserveTokensFloor: 20000,           // 保留空间
+  memoryFlushSoftThreshold: 4000,    // 距上限触发阈值
+  reserveTokensFloor: 20000,          // 保留空间
 }
 
 // Markdown 存储
