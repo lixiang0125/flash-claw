@@ -57,24 +57,23 @@ export class FeishuBot {
   private initWSClient(): void {
     if (!this.config.appId || !this.config.appSecret) return;
 
-    const sdkConfig = {
+    // 使用官方文档最简单的调用方式
+    const client = new Lark.Client({
       appId: this.config.appId,
       appSecret: this.config.appSecret,
-      domain: "feishu" as const,
-      appType: "self_build" as const,
-    };
+    });
 
-    this.wsClient = new Lark.WSClient(sdkConfig as any);
+    this.wsClient = new Lark.WSClient({
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
+    });
 
     console.log("Initializing Feishu WebSocket client...");
     console.log("App ID:", this.config.appId);
 
-    // 使用正确的事件分发器格式
-    const eventDispatcher = new Lark.EventDispatcher({});
-    
     // 直接在 start 方法中注册
     (this.wsClient as any).start({
-      eventDispatcher: eventDispatcher.register({
+      eventDispatcher: new Lark.EventDispatcher({}).register({
         "im.message.receive_v1": async (data: any) => {
           console.log("Feishu: Received message event!");
           console.log("Data:", JSON.stringify(data, null, 2));
@@ -141,14 +140,20 @@ export class FeishuBot {
     await this.addReaction(messageId, "face:收到");
 
     // 后台处理实际请求
+    console.log("Feishu: Setting up background task");
     setTimeout(async () => {
+      console.log("Feishu: Background task started");
       try {
+        console.log("Feishu: Calling chatEngine");
         const result = await chatEngine.chat({
           message: text,
           sessionId,
         });
+        console.log("Feishu: Chat done, response length:", result.response.length);
 
+        console.log("Feishu: Calling sendMessage");
         await this.sendMessage(chatId, senderId, result.response);
+        console.log("Feishu: sendMessage completed");
       } catch (error) {
         console.error("Feishu: Chat error:", error);
         const errorResponse = await this.generateErrorResponse(text, error);
@@ -233,10 +238,16 @@ export class FeishuBot {
   ): Promise<void> {
     if (!text) return;
 
+    console.log("Feishu: sendMessage called, chatId:", chatId, "text length:", text?.length);
+
     if (this.config.webhookUrl) {
+      console.log("Feishu: Using webhook mode");
       await this.sendViaWebhook(text);
     } else if (this.config.appId && this.config.appSecret) {
+      console.log("Feishu: Using API mode");
       await this.sendViaAPI(chatId, text);
+    } else {
+      console.log("Feishu: Not configured for sending");
     }
   }
 
@@ -292,32 +303,37 @@ export class FeishuBot {
   }
 
   private async sendViaAPI(chatId: string, text: string): Promise<void> {
-    if (!this.config.appId || !this.config.appSecret) return;
+    console.log("Feishu: sendViaAPI called, chatId:", chatId);
+    if (!this.config.appId || !this.config.appSecret) {
+      console.log("Feishu: No appId or appSecret");
+      return;
+    }
 
     try {
+      console.log("Feishu: Getting token...");
       const token = await this.getTenantAccessToken();
+      console.log("Feishu: Token:", token?.substring(0, 20) + "...");
 
+      console.log("Feishu: Creating client...");
       const client = new Lark.Client({
         appId: this.config.appId,
         appSecret: this.config.appSecret,
-        appType: "self_build" as any,
-        domain: "feishu" as any,
+        domain: Lark.Domain.Lark,
+        disableTokenCache: true,
       });
+      console.log("Feishu: Client created");
 
-      const result = await (client.im.message as any).create({
+      console.log("Feishu: Calling message.create...");
+      const result = await client.im.v1.message.create({
         params: {
-          receive_id_type: "chat_id",
+          receive_id_type: 'chat_id',
         },
         data: {
           receive_id: chatId,
+          msg_type: 'text',
           content: JSON.stringify({ text }),
-          msg_type: "text",
         },
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
+      }, Lark.withTenantToken(token));
       console.log("Feishu: Send result:", JSON.stringify(result));
       
       if (result.code !== 0) {
@@ -325,8 +341,11 @@ export class FeishuBot {
       } else {
         console.log(`Feishu: Sent message to ${chatId}`);
       }
-    } catch (error) {
-      console.error("Feishu: Failed to send message:", error);
+    } catch (error: any) {
+      console.error("Feishu: Failed to send message:", error.message || error);
+      if (error.response) {
+        console.error("Feishu: Response data:", error.response.data);
+      }
     }
   }
 

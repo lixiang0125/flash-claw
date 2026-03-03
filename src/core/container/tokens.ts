@@ -59,6 +59,10 @@ export interface Database {
     params?: unknown[],
   ): { changes: number; lastInsertRowid: number };
   transaction<T>(fn: () => T): T;
+  exec(sql: string): void;
+  get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | null;
+  all<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[];
+  run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number };
   close(): void;
   initialize(): Promise<void>;
   dispose(): Promise<void>;
@@ -230,3 +234,61 @@ export interface IPromptBuilder {
 
 export const PROMPT_BUILDER: ServiceToken<IPromptBuilder> =
   createToken<IPromptBuilder>("PROMPT_BUILDER");
+
+export interface IChatEngine {
+  chat(request: unknown): Promise<unknown>;
+  setMemoryManager(manager: unknown): void;
+  setTools(tools: unknown[]): void;
+  setToolExecutor(executor: unknown): void;
+  clearSession(sessionId: string): void;
+}
+
+export const CHAT_ENGINE: ServiceToken<IChatEngine> =
+  createToken<IChatEngine>("CHAT_ENGINE");
+
+export interface IFeishuBot {
+  handleEvent(body: unknown): Promise<unknown>;
+  isConfigured(): boolean;
+  getConfig(): unknown;
+}
+
+export const FEISHU_BOT: ServiceToken<IFeishuBot> =
+  createToken<IFeishuBot>("FEISHU_BOT");
+
+export interface ITaskScheduler {
+  listTasks(): unknown[];
+  createTask(task: unknown): unknown;
+  getTask(id: string): unknown;
+  updateTask(id: string, updates: unknown): unknown;
+  deleteTask(id: string): boolean;
+  runTask(id: string): Promise<unknown>;
+  getTaskRuns(id: string): unknown[];
+}
+
+export const TASK_SCHEDULER: ServiceToken<ITaskScheduler> =
+  createToken<ITaskScheduler>("TASK_SCHEDULER");
+
+export interface IHeartbeatSystem {
+  getStatus(): unknown;
+  trigger(): Promise<unknown>;
+  getHeartbeatFile(): string;
+}
+
+export const HEARTBEAT_SYSTEM: ServiceToken<IHeartbeatSystem> =
+  createToken<IHeartbeatSystem>("HEARTBEAT_SYSTEM");
+
+export interface ISubAgentSystem {
+  listRuns(): unknown[];
+  getRun(id: string): unknown;
+  killRun(id: string): boolean;
+}
+
+export const SUB_AGENT_SYSTEM: ServiceToken<ISubAgentSystem> =
+  createToken<ISubAgentSystem>("SUB_AGENT_SYSTEM");
+
+export interface HonoApp {
+  fetch: unknown;
+}
+
+export const HTTP_SERVER: ServiceToken<HonoApp> =
+  createToken<HonoApp>("HTTP_SERVER");

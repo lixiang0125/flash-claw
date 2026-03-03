@@ -31,8 +31,7 @@ Flash Claw CLI
 
 async function cmdRun() {
   console.log("Starting Flash Claw server...");
-  const { default: server } = await import("./index.js");
-  await server.fetch(new Request("http://localhost:3000"));
+  await import("./index.js");
 }
 
 async function cmdTasks(args: string[]) {

@@ -11,6 +11,12 @@ import {
   SANDBOX_MANAGER,
   TOOL_REGISTRY,
   TOOL_EXECUTOR,
+  CHAT_ENGINE,
+  FEISHU_BOT,
+  TASK_SCHEDULER,
+  HEARTBEAT_SYSTEM,
+  SUB_AGENT_SYSTEM,
+  HTTP_SERVER,
   EMBEDDING_SERVICE,
   VECTOR_STORE,
   WORKING_MEMORY,
@@ -35,6 +41,12 @@ import {
   type IMemoryManager,
   type IPromptBuilder,
   type IContextBudget,
+  type IChatEngine,
+  type IFeishuBot,
+  type ITaskScheduler,
+  type IHeartbeatSystem,
+  type ISubAgentSystem,
+  type HonoApp,
 } from "./tokens";
 import { TypedEventBus } from "./event-bus";
 import { createSandboxManager } from "../../tools/sandbox";
@@ -47,6 +59,28 @@ import { bashTool } from "../../tools/builtin/bash";
 import { globTool } from "../../tools/builtin/glob";
 import { grepTool } from "../../tools/builtin/grep";
 import { webSearchTool } from "../../tools/builtin/web-search";
+import { chatEngine } from "../../chat/engine";
+import { feishuBot } from "../../integrations/feishu";
+import { taskScheduler } from "../../tasks";
+import { heartbeatSystem } from "../../heartbeat";
+import { subAgentSystem } from "../../subagents";
+import { Hono } from "hono";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import type { ChatRequest } from "../../chat/types";
+import pino from "pino";
+import { EmbeddingService } from "../../memory/embedding/embedding-service";
+import { TransformersEmbeddingProvider } from "../../memory/embedding/transformers-provider";
+import { OllamaEmbeddingProvider } from "../../memory/embedding/ollama-provider";
+import { VectorStore } from "../../memory/vector-store";
+import { WorkingMemory } from "../../memory/working-memory";
+import { ShortTermMemory } from "../../memory/short-term-memory";
+import { LongTermMemory } from "../../memory/long-term-memory";
+import { UserProfileService } from "../../memory/user-profile";
+import { MemoryManager } from "../../memory/memory-manager";
+import { ContextBudget } from "../../memory/context-budget";
+import { SecurityLayer } from "../../security/security-layer";
+import { PromptBuilder } from "../../agent/prompt-builder";
+import { createHonoApp } from "../../infra/hono-app";
 
 export {
   CONFIG,
@@ -58,6 +92,12 @@ export {
   SANDBOX_MANAGER,
   TOOL_REGISTRY,
   TOOL_EXECUTOR,
+  CHAT_ENGINE,
+  FEISHU_BOT,
+  TASK_SCHEDULER,
+  HEARTBEAT_SYSTEM,
+  SUB_AGENT_SYSTEM,
+  HTTP_SERVER,
 };
 export type {
   AppConfig,
@@ -83,8 +123,6 @@ export function loadConfig(): AppConfig {
 }
 
 export function createLogger(config: AppConfig): Logger {
-  const pino = require("pino");
-
   const logger = pino({
     level: config.logLevel,
     transport: config.env === "development"
@@ -153,6 +191,22 @@ export function createDatabase(
 
     transaction<T>(fn: () => T): T {
       return db.transaction(fn)();
+    },
+
+    exec(sql: string): void {
+      db.exec(sql);
+    },
+
+    get<T = Record<string, unknown>>(sql: string, params?: unknown[]): T | null {
+      return db.prepare(sql).get(...(params ?? [])) as T | null;
+    },
+
+    all<T = Record<string, unknown>>(sql: string, params?: unknown[]): T[] {
+      return db.prepare(sql).all(...(params ?? [])) as T[];
+    },
+
+    run(sql: string, params?: unknown[]): { changes: number; lastInsertRowid: number } {
+      return db.prepare(sql).run(...(params ?? []));
     },
 
     close(): void {
@@ -247,7 +301,6 @@ export function createContainer(): Container {
       const logger = resolver.resolve(LOGGER);
       const sandboxManager = resolver.resolve(SANDBOX_MANAGER);
       const toolRegistry = resolver.resolve(TOOL_REGISTRY);
-      const { SecurityLayer } = require("../../security/security-layer");
       const securityLayer = new SecurityLayer(undefined, logger);
       return new ToolExecutor(
         new Map(toolRegistry.getAll().map((t: any) => [t.name, t])),
@@ -267,7 +320,6 @@ export function createContainer(): Container {
     factory: (resolver) => {
       const logger = resolver.resolve(LOGGER);
       const mainDb = resolver.resolve(DATABASE);
-      const { TransformersEmbeddingProvider, OllamaEmbeddingProvider, EmbeddingService } = require("../../memory/embedding");
       const providers = [
         new TransformersEmbeddingProvider(),
         new OllamaEmbeddingProvider(),
@@ -285,7 +337,6 @@ export function createContainer(): Container {
     factory: (resolver) => {
       const logger = resolver.resolve(LOGGER);
       const mainDb = resolver.resolve(DATABASE);
-      const { VectorStore } = require("../../memory/vector-store");
       const store = new VectorStore(mainDb as any, logger, { dimensions: 384 });
       store.initialize();
       return store;
@@ -296,8 +347,7 @@ export function createContainer(): Container {
   container.register({
     token: WORKING_MEMORY,
     lifecycle: Lifecycle.Singleton,
-    factory: (resolver) => {
-      const { WorkingMemory } = require("../../memory/working-memory");
+    factory: () => {
       return new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
     },
   });
@@ -308,7 +358,6 @@ export function createContainer(): Container {
     lifecycle: Lifecycle.Singleton,
     factory: (resolver) => {
       const mainDb = resolver.resolve(DATABASE);
-      const { ShortTermMemory } = require("../../memory/short-term-memory");
       const stm = new ShortTermMemory(mainDb as any);
       stm.initialize();
       return stm;
@@ -324,7 +373,6 @@ export function createContainer(): Container {
       const mainDb = resolver.resolve(DATABASE);
       const vectorStore = resolver.resolve(VECTOR_STORE);
       const embeddingService = resolver.resolve(EMBEDDING_SERVICE);
-      const { LongTermMemory } = require("../../memory/long-term-memory");
       return new LongTermMemory(
         vectorStore as any,
         embeddingService as any,
@@ -341,7 +389,6 @@ export function createContainer(): Container {
     factory: (resolver) => {
       const logger = resolver.resolve(LOGGER);
       const mainDb = resolver.resolve(DATABASE);
-      const { UserProfileService } = require("../../memory/user-profile");
       return new UserProfileService(mainDb as any, logger);
     },
   });
@@ -356,7 +403,6 @@ export function createContainer(): Container {
       const shortTermMemory = resolver.resolve(SHORT_TERM_MEMORY);
       const longTermMemory = resolver.resolve(LONG_TERM_MEMORY);
       const userProfile = resolver.resolve(USER_PROFILE);
-      const { MemoryManager } = require("../../memory/memory-manager");
       return new MemoryManager(
         workingMemory as any,
         shortTermMemory as any,
@@ -372,7 +418,6 @@ export function createContainer(): Container {
     token: CONTEXT_BUDGET,
     lifecycle: Lifecycle.Singleton,
     factory: () => {
-      const { ContextBudget } = require("../../memory/context-budget");
       return new ContextBudget();
     },
   });
@@ -385,12 +430,127 @@ export function createContainer(): Container {
       const logger = resolver.resolve(LOGGER);
       const contextBudget = resolver.resolve(CONTEXT_BUDGET);
       const memoryManager = resolver.resolve(MEMORY_MANAGER);
-      const { PromptBuilder } = require("../../agent/prompt-builder");
       return new PromptBuilder(
         contextBudget as any,
         memoryManager as any,
         logger,
       );
+    },
+  });
+
+  // ===== Application Services =====
+
+  // ChatEngine
+  container.register({
+    token: CHAT_ENGINE,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const toolRegistry = resolver.resolve(TOOL_REGISTRY);
+      const toolExecutor = resolver.resolve(TOOL_EXECUTOR);
+      const memoryManager = resolver.resolve(MEMORY_MANAGER);
+
+      function toQwenTools(tools: any): any[] {
+        const fromZod = (schema: any) => {
+          if (!schema) return { type: "object", properties: {} };
+          try {
+            return zodToJsonSchema(schema) || { type: "object", properties: {} };
+          } catch {
+            return { type: "object", properties: {} };
+          }
+        };
+
+        if (Array.isArray(tools)) {
+          return tools.map((t: any) => ({
+            type: "function",
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: fromZod(t.inputSchema),
+            },
+          }));
+        }
+        return Object.values(tools).map((t: any) => ({
+          type: "function",
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: fromZod(t.inputSchema),
+          },
+        }));
+      }
+
+      const qwenTools = toQwenTools(toolRegistry.getAll());
+      chatEngine.setTools(qwenTools as any);
+      chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
+        logger.debug(`[TOOL_CALL] ${name}`, { args: JSON.stringify(args).substring(0, 200) });
+        const execResult = await toolExecutor.execute(name, args, sessionId) as { success: boolean; output?: string; error?: string };
+        logger.debug(`[TOOL_RESULT] ${name}`, { success: execResult.success, error: execResult.error });
+        return { result: execResult.output, error: execResult.error || undefined };
+      });
+      chatEngine.setMemoryManager(memoryManager as any);
+      logger.info("ChatEngine initialized with tools", { toolCount: qwenTools.length });
+
+      return chatEngine as any;
+    },
+  });
+
+  // FeishuBot
+  container.register({
+    token: FEISHU_BOT,
+    lifecycle: Lifecycle.Singleton,
+    factory: () => {
+      return feishuBot as any;
+    },
+  });
+
+  // TaskScheduler
+  container.register({
+    token: TASK_SCHEDULER,
+    lifecycle: Lifecycle.Singleton,
+    factory: () => {
+      return taskScheduler as any;
+    },
+  });
+
+  // HeartbeatSystem
+  container.register({
+    token: HEARTBEAT_SYSTEM,
+    lifecycle: Lifecycle.Singleton,
+    factory: () => {
+      return heartbeatSystem as any;
+    },
+  });
+
+  // SubAgentSystem
+  container.register({
+    token: SUB_AGENT_SYSTEM,
+    lifecycle: Lifecycle.Singleton,
+    factory: () => {
+      return subAgentSystem as any;
+    },
+  });
+
+  // Hono HTTP Server
+  container.register({
+    token: HTTP_SERVER,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const chatEngine = resolver.resolve(CHAT_ENGINE);
+      const feishuBot = resolver.resolve(FEISHU_BOT);
+      const taskScheduler = resolver.resolve(TASK_SCHEDULER);
+      const heartbeatSystem = resolver.resolve(HEARTBEAT_SYSTEM);
+      const subAgentSystem = resolver.resolve(SUB_AGENT_SYSTEM);
+      const logger = resolver.resolve(LOGGER);
+
+      return createHonoApp({
+        chatEngine: chatEngine as any,
+        feishuBot: feishuBot as any,
+        taskScheduler: taskScheduler as any,
+        heartbeatSystem: heartbeatSystem as any,
+        subAgentSystem: subAgentSystem as any,
+        logger,
+      }) as any;
     },
   });
 

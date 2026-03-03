@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+### DI 容器激活 (2026-03-03)
+
+**架构改进**:
+
+- **H-1**: 激活 DI 容器，消除 ~800 行死代码
+  - 在 `tokens.ts` 添加 CHAT_ENGINE, FEISHU_BOT, TASK_SCHEDULER, HEARTBEAT_SYSTEM, SUB_AGENT_SYSTEM, HTTP_SERVER
+  - 在 `bootstrap.ts` 注册所有应用服务
+  - 创建 `src/infra/hono-app.ts` 封装 Hono 应用创建
+  - 修改 `src/index.ts` 使用 bootstrap() 替代手动构建
+  - 完善 Database 接口 (添加 exec, get, all, run 方法)
+  - 22 个服务全部通过 DI 容器管理
+
+**验证结果**:
+
+- 服务器启动成功，所有 API 端点正常工作
+- 工具调用 (glob, read_file) 正常
+- 依赖注入正确工作，结构化日志正常输出
+
+---
+
 ### 架构治理与功能增强 (2026-03-03)
 
 **架构改进**:
