@@ -7,6 +7,7 @@ export interface AppConfig {
   readonly llmModel: string;
   readonly env: "development" | "production" | "test";
   readonly logLevel: "debug" | "info" | "warn" | "error";
+  readonly workspacePath: string;
 }
 
 export const CONFIG: ServiceToken<AppConfig> = createToken<AppConfig>("CONFIG");
@@ -285,6 +286,18 @@ export interface ISubAgentSystem {
 
 export const SUB_AGENT_SYSTEM: ServiceToken<ISubAgentSystem> =
   createToken<ISubAgentSystem>("SUB_AGENT_SYSTEM");
+
+export interface IMarkdownMemory {
+  initialize(): Promise<void>;
+  appendDailyLog(content: string): Promise<string>;
+  appendToMemory(content: string, section?: string): Promise<string>;
+  searchInFiles(query: string, limit?: number): Promise<unknown[]>;
+  getMemoryContent(section?: string): Promise<string>;
+  getDailyLogs(days?: number): Promise<string[]>;
+}
+
+export const MARKDOWN_MEMORY: ServiceToken<IMarkdownMemory> =
+  createToken<IMarkdownMemory>("MARKDOWN_MEMORY");
 
 export interface HonoApp {
   fetch: unknown;

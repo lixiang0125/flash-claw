@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+### Markdown 记忆系统集成 (2026-03-04)
+
+**集成完成**:
+
+- **M-27**: 在 bootstrap.ts 注册 MarkdownMemory 服务
+- **M-28**: 添加 WORKSPACE_PATH 环境变量配置
+- **M-29**: 预压缩刷写回调集成 - 对话溢出前自动保存到 daily log
+- **M-30**: 创建工作区目录和 MEMORY.md 初始化
+
+**工作区结构**:
+```
+./data/workspace/
+├── MEMORY.md              # 长期策划记忆
+└── memory/
+    └── YYYY-MM-DD.md     # 日记式记录
+```
+
+---
+
+### 记忆系统增强 (2026-03-04)
+
+**混合搜索优化**:
+
+- **M-14**: 并集设计 - 向量搜索和 FTS 搜索独立执行、独立失败
+- **M-15**: BM25 归一化 - 使用 `1/(1+bm25_rank)` 将排名转换为 0-1 分数
+- **M-16**: MMR 重排序 - 基于内容相似度保证结果多样性
+- **M-17**: 候选倍增器 - 默认 4 倍，从更多候选中筛选
+
+**预压缩刷写 (Pre-Compaction Flush)**:
+
+- **M-18**: 新增 `setFlushCallback()` 注册刷写回调
+- **M-19**: 新增 `shouldFlush()` 检测软阈值（距上限 4000 tokens）
+- **M-20**: 新增 `tryFlush()` 在压缩前触发刷写
+- **M-21**: 跟踪每个压缩周期，防止重复刷写
+
+**Markdown 文件存储**:
+
+- **M-22**: 新增 `MarkdownMemory` 类
+- **M-23**: 支持 MEMORY.md 长期策划记忆
+- **M-24**: 支持 memory/YYYY-MM-DD.md 日记式记录
+- **M-25**: 会话启动时加载"今天 + 昨天"日志
+- **M-26**: 提供关键字搜索功能
+
+---
+
 ### DI 容器激活 (2026-03-03)
 
 **架构改进**:

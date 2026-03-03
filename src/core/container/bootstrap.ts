@@ -26,6 +26,7 @@ import {
   MEMORY_MANAGER,
   CONTEXT_BUDGET,
   PROMPT_BUILDER,
+  MARKDOWN_MEMORY,
   type AppConfig,
   type Logger,
   type Database,
@@ -78,6 +79,7 @@ import { LongTermMemory } from "../../memory/long-term-memory";
 import { UserProfileService } from "../../memory/user-profile";
 import { MemoryManager } from "../../memory/memory-manager";
 import { ContextBudget } from "../../memory/context-budget";
+import { MarkdownMemory } from "../../memory/markdown-memory";
 import { SecurityLayer } from "../../security/security-layer";
 import { PromptBuilder } from "../../agent/prompt-builder";
 import { createHonoApp } from "../../infra/hono-app";
@@ -119,6 +121,7 @@ export function loadConfig(): AppConfig {
     llmModel: process.env["LLM_MODEL"] ?? "gpt-4o",
     env: (process.env["NODE_ENV"] as AppConfig["env"]) ?? "development",
     logLevel: (process.env["LOG_LEVEL"] as AppConfig["logLevel"]) ?? "info",
+    workspacePath: process.env["WORKSPACE_PATH"] ?? "./data/workspace",
   };
 }
 
@@ -347,8 +350,44 @@ export function createContainer(): Container {
   container.register({
     token: WORKING_MEMORY,
     lifecycle: Lifecycle.Singleton,
-    factory: () => {
-      return new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const config = resolver.resolve(CONFIG);
+      const markdownMemory = resolver.resolve(MARKDOWN_MEMORY);
+
+      const workingMemory = new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
+
+      workingMemory.setFlushCallback(async (sessionId, recentMessages) => {
+        const timestamp = new Date().toISOString().split("T")[0];
+        const logContent = recentMessages
+          .filter((m) => m.role === "user" || m.role === "assistant")
+          .map((m) => `- **${m.role}**: ${m.content.slice(0, 200)}`)
+          .join("\n");
+
+        if (logContent) {
+          await markdownMemory.appendDailyLog(`## ${sessionId.slice(0, 8)}\n${logContent}\n`);
+          logger.debug(`Pre-compaction flush: saved ${recentMessages.length} messages to daily log`);
+        }
+      });
+
+      return workingMemory;
+    },
+  });
+
+  // Markdown 文件存储
+  container.register({
+    token: MARKDOWN_MEMORY,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const config = resolver.resolve(CONFIG);
+      const markdownMemory = new MarkdownMemory(logger, {
+        workspacePath: config.workspacePath,
+        enableDailyLogs: true,
+        enableMemoryFile: true,
+      });
+      markdownMemory.initialize();
+      return markdownMemory;
     },
   });
 

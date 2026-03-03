@@ -95,12 +95,19 @@ class ChatEngine {
 
       let relevantMemories = "";
       if (this.memoryManager) {
+        let searchText = message;
+        const isAskingAboutUser = /我是谁|我的名字|我是谁|我叫|我叫什么|认识我/i.test(message);
+        if (isAskingAboutUser) {
+          searchText = "用户事实 名字 叫 李享 张三 王五 开发者 学生";
+        }
+        
         const memResults = await this.memoryManager.recall({
-          text: message,
+          text: searchText,
           userId,
           sessionId,
           limit: 5,
         });
+        console.log("[DEBUG] memories found:", memResults.length, memResults.map(m => m.entry.content));
         if (memResults.length > 0) {
           relevantMemories = "\n\n## 相关记忆\n" + 
             memResults.map(m => `- ${m.entry.content}`).join("\n");

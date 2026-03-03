@@ -109,6 +109,26 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 - 本地嵌入模型 (Transformers.js / Ollama)，数据不出本地
 - sqlite-vec 向量搜索 + FTS5 全文搜索混合检索
 - 上下文预算管理，控制 Token 在 20K 以内
+- **混合搜索优化**: 并集设计 + BM25 归一化 + MMR 重排序
+- **预压缩刷写**: 上下文溢出前主动保存记忆到磁盘
+- **Markdown 文件存储**: 可审计、可版本控制的持久记忆
+
+**配置选项**:
+```typescript
+// 向量存储
+VectorStoreConfig {
+  enableMMR: true,           // 启用 MMR 重排序
+  mmrLambda: 0.7,           // 相关性权重
+  candidateMultiplier: 4,   // 候选倍增
+}
+
+// 工作内存
+WorkingMemoryConfig {
+  memoryFlushEnabled: true,
+  memoryFlushSoftThreshold: 4000,
+  reserveTokensFloor: 20000,
+}
+```
 
 ## 功能特性
 
@@ -304,6 +324,7 @@ flash-claw/
 | FEISHU_APP_SECRET | 飞书应用密钥 | - |
 | TAVILY_API_KEY | Tavily 搜索 API | - |
 | USE_DOCKER_SANDBOX | 使用 Docker 沙箱 | false |
+| WORKSPACE_PATH | Markdown 记忆工作区路径 | ./data/workspace |
 
 ## CLI 命令
 
