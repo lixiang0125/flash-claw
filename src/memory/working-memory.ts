@@ -162,6 +162,15 @@ export class WorkingMemory {
     };
   }
 
+  getTokenUsage(sessionId: string): number {
+    const messages = this.getMessages(sessionId);
+    return this.estimateTokens(messages);
+  }
+
+  getConfig(): WorkingMemoryConfig {
+    return { ...this.config };
+  }
+
   private estimateTokens(messages: ConversationMessage[]): number {
     return messages.reduce((sum, m) => {
       const text = m.content;

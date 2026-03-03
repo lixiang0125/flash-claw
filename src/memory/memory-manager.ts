@@ -149,16 +149,8 @@ export class MemoryManager implements IMemoryManager {
   }
 
   private async saveToMarkdownIfNeeded(userText: string, response: string, sessionId: string): Promise<void> {
-    const memoryKeywords = ["记住", "记住这个", "请记住", "帮我记住", "记得", "不要忘记", "记住我", "remember", "don't forget", "keep in mind"];
-    const selfIntroPatterns = [/我(?:叫|是|名字|姓名)(?:叫|是|为)?(.+)/, /my name is (.+)/i, /I am (.+)/i];
-    const preferencePatterns = [/我(?:喜欢|偏好|讨厌|不喜欢)(.+)/, /I (?:like|prefer|hate|dislike)(.+)/i];
-    
-    const shouldSaveByKeyword = memoryKeywords.some(kw => userText.toLowerCase().includes(kw.toLowerCase()));
-    const shouldSaveByIntro = selfIntroPatterns.some(p => p.test(userText));
-    const shouldSaveByPref = preferencePatterns.some(p => p.test(userText));
-    
-    if (!shouldSaveByKeyword && !shouldSaveByIntro && !shouldSaveByPref) return;
-
+    // OpenClaw 模式：每次对话都记录到 daily log
+    // 这模仿了 OpenClaw 的 memory/YYYY-MM-DD.md 设计
     const workspacePath = process.env["WORKSPACE_PATH"] || "./data/workspace";
     if (!workspacePath) return;
 
@@ -168,24 +160,52 @@ export class MemoryManager implements IMemoryManager {
       await fs.mkdir(memoryDir, { recursive: true });
       
       const logPath = path.join(memoryDir, `${today}.md`);
-      let content = "";
+      const timestamp = new Date().toLocaleTimeString();
       
-      if (shouldSaveByIntro) {
-        const match = selfIntroPatterns.find(p => p.test(userText))?.exec(userText);
-        content = `\n## 用户信息\n- **名字**: ${match?.[1] || userText.slice(0, 50)}\n`;
-      } else if (shouldSaveByPref) {
-        const match = preferencePatterns.find(p => p.test(userText))?.exec(userText);
-        content = `\n## 用户偏好\n- ${match?.[0] || userText.slice(0, 100)}\n`;
+      const content = `\n- **${timestamp}** ${sessionId.slice(0, 4)}: ${userText.slice(0, 50)}${userText.length > 50 ? "..." : ""}\n`;
+      
+      const existing = await fs.readFile(logPath, "utf-8").catch(() => `# ${today}\n\n## 对话记录\n`);
+      await fs.writeFile(logPath, existing + content);
+    } catch (err) {
+      // 静默失败，不影响主流程
+    }
+  }
+
+  async saveSessionToMarkdown(sessionId: string): Promise<void> {
+    const workspacePath = process.env["WORKSPACE_PATH"] || "./data/workspace";
+    if (!workspacePath) return;
+
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const memoryDir = path.join(workspacePath, "memory");
+      await fs.mkdir(memoryDir, { recursive: true });
+      
+      const logPath = path.join(memoryDir, `${today}.md`);
+      const messages = this.workingMemory.getMessages(sessionId);
+      
+      if (messages.length === 0) return;
+
+      let content = `\n## ${sessionId.slice(0, 8)}\n`;
+      content += `时间: ${new Date().toLocaleString()}\n\n`;
+      
+      for (const msg of messages) {
+        const roleEmoji = msg.role === "user" ? "👤" : msg.role === "assistant" ? "🤖" : "📝";
+        const truncated = msg.content.length > 200 ? msg.content.slice(0, 200) + "..." : msg.content;
+        content += `${roleEmoji} **${msg.role}**: ${truncated}\n\n`;
+      }
+
+      const existing = await fs.readFile(logPath, "utf-8").catch(() => `# ${today}\n\n## 对话记录\n`);
+      const hasSection = existing.includes("## 对话记录");
+      
+      if (!hasSection) {
+        await fs.writeFile(logPath, existing + "## 对话记录\n" + content);
       } else {
-        content = `\n## 记忆\n**用户**: ${userText.slice(0, 100)}\n\n**回复**: ${response.slice(0, 200)}\n`;
+        await fs.writeFile(logPath, existing + content);
       }
       
-      const existing = await fs.readFile(logPath, "utf-8").catch(() => `# ${today}\n`);
-      await fs.writeFile(logPath, existing + content);
-      
-      this.logger.info(`Saved memory to ${logPath}`);
+      this.logger.info(`Session ${sessionId.slice(0, 8)} saved to ${logPath}`);
     } catch (err) {
-      this.logger.warn(`Failed to save markdown memory: ${err}`);
+      this.logger.warn(`Failed to save session: ${err}`);
     }
   }
 
