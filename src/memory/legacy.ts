@@ -5,6 +5,9 @@ const USER_FILE = "USER.md";
 const MEMORY_FILE = "MEMORY.md";
 const SOUL_FILE = "SOUL.md";
 
+/**
+ * @deprecated 使用 UserProfileService 替代。这些文件将逐步迁移到数据库。
+ */
 export function readUser(): string {
   const filePath = path.join(process.cwd(), USER_FILE);
   if (!fs.existsSync(filePath)) {

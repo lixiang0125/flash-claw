@@ -45,16 +45,20 @@ class TaskScheduler {
   }
   private isRunning: boolean = false;
 
-  constructor() {
-    const dbPath = path.join(process.cwd(), "data", "tasks.db");
+  constructor(db?: InstanceType<typeof Database>) {
+    const customDbPath = process.env.TASKS_DB_PATH;
+    const dbPath = customDbPath || path.join(process.cwd(), "data", "flashclaw.db");
     
-    const fs = require("fs");
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    if (db) {
+      this.db = db;
+    } else {
+      const fs = require("fs");
+      const dir = path.dirname(dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      this.db = new Database(dbPath);
     }
-
-    this.db = new Database(dbPath);
     this.initTables();
     this.startScheduler();
   }

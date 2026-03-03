@@ -32,14 +32,20 @@ class HeartbeatSystem {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private heartbeatFile: string;
 
-  constructor() {
-    const dbPath = path.join(process.cwd(), "data", "heartbeat.db");
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  constructor(db?: InstanceType<typeof Database>) {
+    const customDbPath = process.env.HEARTBEAT_DB_PATH;
+    const dbPath = customDbPath || path.join(process.cwd(), "data", "flashclaw.db");
+    
+    if (db) {
+      this.db = db;
+    } else {
+      const dir = path.dirname(dbPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      this.db = new Database(dbPath);
     }
-
-    this.db = new Database(dbPath);
+    
     this.heartbeatFile = path.join(process.cwd(), "HEARTBEAT.md");
     this.initTables();
     this.start();
