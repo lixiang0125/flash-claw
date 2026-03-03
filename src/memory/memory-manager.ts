@@ -150,9 +150,14 @@ export class MemoryManager implements IMemoryManager {
 
   private async saveToMarkdownIfNeeded(userText: string, response: string, sessionId: string): Promise<void> {
     const memoryKeywords = ["记住", "记住这个", "请记住", "帮我记住", "记得", "不要忘记", "记住我", "remember", "don't forget", "keep in mind"];
-    const shouldSave = memoryKeywords.some(kw => userText.toLowerCase().includes(kw.toLowerCase()));
+    const selfIntroPatterns = [/我(?:叫|是|名字|姓名)(?:叫|是|为)?(.+)/, /my name is (.+)/i, /I am (.+)/i];
+    const preferencePatterns = [/我(?:喜欢|偏好|讨厌|不喜欢)(.+)/, /I (?:like|prefer|hate|dislike)(.+)/i];
     
-    if (!shouldSave) return;
+    const shouldSaveByKeyword = memoryKeywords.some(kw => userText.toLowerCase().includes(kw.toLowerCase()));
+    const shouldSaveByIntro = selfIntroPatterns.some(p => p.test(userText));
+    const shouldSaveByPref = preferencePatterns.some(p => p.test(userText));
+    
+    if (!shouldSaveByKeyword && !shouldSaveByIntro && !shouldSaveByPref) return;
 
     const workspacePath = process.env["WORKSPACE_PATH"] || "./data/workspace";
     if (!workspacePath) return;
@@ -163,7 +168,17 @@ export class MemoryManager implements IMemoryManager {
       await fs.mkdir(memoryDir, { recursive: true });
       
       const logPath = path.join(memoryDir, `${today}.md`);
-      const content = `\n## ${sessionId.slice(0, 8)} - ${new Date().toLocaleTimeString()}\n\n**用户**: ${userText}\n\n**记忆**: ${response}\n`;
+      let content = "";
+      
+      if (shouldSaveByIntro) {
+        const match = selfIntroPatterns.find(p => p.test(userText))?.exec(userText);
+        content = `\n## 用户信息\n- **名字**: ${match?.[1] || userText.slice(0, 50)}\n`;
+      } else if (shouldSaveByPref) {
+        const match = preferencePatterns.find(p => p.test(userText))?.exec(userText);
+        content = `\n## 用户偏好\n- ${match?.[0] || userText.slice(0, 100)}\n`;
+      } else {
+        content = `\n## 记忆\n**用户**: ${userText.slice(0, 100)}\n\n**回复**: ${response.slice(0, 200)}\n`;
+      }
       
       const existing = await fs.readFile(logPath, "utf-8").catch(() => `# ${today}\n`);
       await fs.writeFile(logPath, existing + content);
