@@ -61,8 +61,8 @@ export const editFileTool: FlashClawToolDefinition<typeof EditFileInput, EditFil
 
     if (input.replaceAll) {
       const regex = new RegExp(escapeRegExp(input.oldString), "g");
+      matchCount = (content.match(regex) || []).length;
       newContent = content.replace(regex, input.newString);
-      matchCount = (newContent.match(regex) || []).length;
     } else {
       newContent = content.replace(input.oldString, input.newString);
       matchCount = 1;

@@ -187,13 +187,13 @@ export interface IShortTermMemory {
 export const SHORT_TERM_MEMORY: ServiceToken<IShortTermMemory> =
   createToken<IShortTermMemory>("SHORT_TERM_MEMORY");
 
-export interface ILonTermMemory {
+export interface ILongTermMemory {
   store(entry: unknown): Promise<string>;
   recall(query: unknown): Promise<unknown[]>;
 }
 
-export const LONG_TERM_MEMORY: ServiceToken<ILonTermMemory> =
-  createToken<ILonTermMemory>("LONG_TERM_MEMORY");
+export const LONG_TERM_MEMORY: ServiceToken<ILongTermMemory> =
+  createToken<ILongTermMemory>("LONG_TERM_MEMORY");
 
 export interface IUserProfile {
   getProfile(userId: string): Promise<unknown>;

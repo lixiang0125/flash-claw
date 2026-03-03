@@ -6,6 +6,7 @@ import { readUser, readSoul, readMemory, extractInfoToRemember, type IMemoryMana
 import { parseTaskFromMessage, cronToHumanReadable } from "./parsers";
 import { parseTaskWithLLM } from "./llm-parser";
 import type { ChatRequest, ChatResponse } from "./types";
+import { ErrorSanitizer } from "../infra/error-handler";
 
 const MAX_STEPS = 10;
 
@@ -164,10 +165,9 @@ class ChatEngine {
         sessionId,
       };
     } catch (error: unknown) {
-      const err = error as Error;
-      console.error("Chat error:", err);
+      const sanitizedMessage = ErrorSanitizer.sanitize(error, { sessionId, operation: "chat" });
       return {
-        response: `处理消息时出错: ${err.message}`,
+        response: sanitizedMessage,
         sessionId,
       };
     }

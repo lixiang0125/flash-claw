@@ -2,6 +2,59 @@
 
 All notable changes to this project will be documented in this file.
 
+### 安全加固与 Bug 修复 (2026-03-03)
+
+**安全漏洞修复**:
+
+- **C-1**: 实现边界文件读写校验 (`src/infra/fs/boundary.ts`)
+  - 添加路径边界检查，防止目录穿越攻击
+  - 符号链接穿越检测
+  - 敏感路径保护 (.env, .git, node_modules)
+
+- **C-2**: 修复 Skill 脚本执行命令注入
+  - 使用 `execFile` 替代 `execSync` 直接执行命令
+  - 参数数组传递，避免 shell 解析
+
+- **C-3**: 默认安全策略改为最小权限
+  - `readablePathPatterns` 限制为 data/, .flashclaw/, skills/
+  - `writablePathPatterns` 限制为 data/, .flashclaw/skills/, .flashclaw/evolution/
+
+- **C-4**: 本地沙箱添加最低隔离
+  - 生产环境强制要求 Docker 沙箱
+  - 开发环境使用临时目录隔离
+  - 添加受限环境变量
+
+- **C-5**: Legacy Bash 工具添加安全检查
+  - 集成 SecurityLayer 命令黑名单检查
+
+- **C-6**: SSRF 保护升级
+  - 使用异步 DNS 检查 (`checkWithDNS`)
+  - 添加重定向目标检查
+
+- **C-7**: Evolution 高风险计划添加确认门
+  - 高/中风险计划需要用户确认才能执行
+
+**Bug 修复**:
+
+- **M-3**: 修复 edit-file matchCount bug
+  - 替换前先计数，而非替换后计数
+
+- **M-4**: 修复 ILonTermMemory 拼写错误
+  - 改为 ILongTermMemory
+
+- **M-9**: 修复 SESSION_TIMEOUT 文档与代码不一致
+  - 读取环境变量而非硬编码
+
+- **M-11**: 错误消息脱敏
+  - 添加 ErrorSanitizer 统一错误处理
+  - 错误编号追踪，内部日志记录
+
+**功能增强**:
+
+- **M-8**: 实现环境变量 Zod 校验 (`src/config/env.ts`)
+  - 启动时校验必要环境变量
+  - 类型安全的配置访问
+
 ### 记忆系统 (2026-03-03)
 
 **改造点**:

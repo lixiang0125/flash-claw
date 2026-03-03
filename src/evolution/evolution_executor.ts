@@ -1,7 +1,9 @@
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { chatEngine } from "../chat";
 import type { EvolutionPlan } from "./evolution_planner";
+import type { FeedbackAnalysis } from "./feedback_analyzer";
+import { validateWritePath } from "../infra/fs/boundary";
 
 const EVOLUTION_LOG = join(process.cwd(), "evolution.log");
 
@@ -11,11 +13,32 @@ interface EvolutionResult {
   planId: string;
 }
 
-export async function executeEvolutionPlan(plan: EvolutionPlan): Promise<EvolutionResult> {
+export interface EvolutionOptions {
+  requireConfirmation?: (plan: EvolutionPlan) => Promise<boolean>;
+}
+
+export async function executeEvolutionPlan(
+  plan: EvolutionPlan,
+  options: EvolutionOptions = {}
+): Promise<EvolutionResult> {
+  if (plan.riskLevel === "high" || plan.riskLevel === "medium") {
+    if (!options.requireConfirmation) {
+      return {
+        success: false,
+        message: `${plan.riskLevel}-risk plan requires confirmation callback`,
+        planId: plan.planId,
+      };
+    }
+    const confirmed = await options.requireConfirmation(plan);
+    if (!confirmed) {
+      return { success: false, message: "User rejected the evolution plan", planId: plan.planId };
+    }
+  }
+
   console.log(`[Evolution] Executing plan: ${plan.description}`);
 
   try {
-    const targetPath = join(process.cwd(), plan.targetPath);
+    const targetPath = validateWritePath(plan.targetPath);
 
     const dir = dirname(targetPath);
     if (!existsSync(dir)) {
@@ -78,7 +101,10 @@ export async function verifyEvolution(plan: EvolutionPlan): Promise<boolean> {
   }
 }
 
-export async function evolve(analysis: any): Promise<EvolutionResult> {
+export async function evolve(
+  analysis: FeedbackAnalysis,
+  options: EvolutionOptions = {}
+): Promise<EvolutionResult> {
   const { generateEvolutionPlan } = await import("./evolution_planner");
   const plan = await generateEvolutionPlan(analysis);
 
@@ -90,11 +116,7 @@ export async function evolve(analysis: any): Promise<EvolutionResult> {
     };
   }
 
-  if (plan.riskLevel === "high") {
-    console.log(`[Evolution] High risk plan requires user confirmation: ${plan.description}`);
-  }
-
-  const result = await executeEvolutionPlan(plan);
+  const result = await executeEvolutionPlan(plan, options);
 
   if (result.success) {
     const verified = await verifyEvolution(plan);

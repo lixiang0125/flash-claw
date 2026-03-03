@@ -25,8 +25,21 @@ export interface AuditEntry {
 }
 
 export const DEFAULT_SECURITY_POLICY: SecurityPolicy = {
-  readablePathPatterns: ["**/*"],
-  writablePathPatterns: ["**/*"],
+  readablePathPatterns: [
+    "data/**/*",
+    ".flashclaw/**/*",
+    "skills/**/*",
+    "*.md",
+    "*.txt",
+    "*.json",
+    "*.yaml",
+    "*.yml",
+  ],
+  writablePathPatterns: [
+    "data/**/*",
+    ".flashclaw/skills/**/*",
+    ".flashclaw/evolution/**/*",
+  ],
   blockedCommands: [
     "rm\\s+(-rf?|--recursive)\\s+/",
     "mkfs\\b",

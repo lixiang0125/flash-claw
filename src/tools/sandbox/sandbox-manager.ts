@@ -5,6 +5,9 @@ import type {
   PoolStats,
 } from "./sandbox-types.js";
 import { DEFAULT_SANDBOX_CONFIG } from "./sandbox-types.js";
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 
 export interface ISandboxManager {
   initialize(): Promise<void>;
@@ -31,6 +34,7 @@ export class SandboxManager implements ISandboxManager {
   private pool: Map<string, SandboxInstance> = new Map();
   private sessionMap: Map<string, string> = new Map();
   private localWorkDir: string;
+  private isolatedWorkDir: string | null = null;
 
   constructor(
     config: Partial<SandboxConfig> = {},
@@ -43,7 +47,22 @@ export class SandboxManager implements ISandboxManager {
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    this.logger.info("SandboxManager initializing (local mode)");
+
+    if (process.env.NODE_ENV === "production" && !this.config.useDocker) {
+      throw new Error(
+        "Production mode requires Docker sandbox. Set USE_DOCKER_SANDBOX=true or disable production mode."
+      );
+    }
+
+    if (!this.config.useDocker) {
+      this.isolatedWorkDir = await mkdtemp(join(tmpdir(), "flashclaw-sandbox-"));
+      this.logger.info("SandboxManager initializing (local isolated mode)", {
+        workDir: this.isolatedWorkDir,
+      });
+    } else {
+      this.logger.info("SandboxManager initializing (local mode)");
+    }
+
     this.initialized = true;
   }
 
@@ -53,9 +72,10 @@ export class SandboxManager implements ISandboxManager {
       return this.pool.get(existingId)!;
     }
 
+    const workDir = this.isolatedWorkDir || this.localWorkDir;
     const instance: SandboxInstance = {
       containerId: `local-${sessionId}`,
-      workDir: this.localWorkDir,
+      workDir,
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
       status: "busy",
@@ -81,31 +101,47 @@ export class SandboxManager implements ISandboxManager {
   }
 
   async exec(sessionId: string, command: string, timeoutMs = 30_000): Promise<ExecResult> {
-    const { execSync } = await import("child_process");
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
     const startTime = Date.now();
 
+    const instance = this.pool.get(`local-${sessionId}`);
+    const workDir = instance?.workDir || this.isolatedWorkDir || this.localWorkDir;
+
     try {
-      const result = execSync(command, {
-        cwd: this.localWorkDir,
-        timeout: timeoutMs,
-        maxBuffer: 10 * 1024 * 1024,
-        encoding: "utf-8",
-      });
+      const { stdout, stderr } = await execFileAsync(
+        "/bin/bash",
+        ["-c", command],
+        {
+          cwd: workDir,
+          timeout: timeoutMs,
+          maxBuffer: 10 * 1024 * 1024,
+          env: {
+            PATH: "/usr/local/bin:/usr/bin:/bin",
+            HOME: workDir,
+            TMPDIR: workDir,
+            SKILL_NAME: sessionId,
+          },
+          uid: process.getuid?.() === 0 ? 65534 : undefined,
+          gid: process.getgid?.() === 0 ? 65534 : undefined,
+        }
+      );
 
       return {
         exitCode: 0,
-        stdout: result,
-        stderr: "",
+        stdout: stdout || "",
+        stderr: stderr || "",
         timedOut: false,
         durationMs: Date.now() - startTime,
       };
     } catch (error: unknown) {
-      const err = error as { status?: number; message?: string; stdout?: string; stderr?: string };
+      const err = error as { status?: number; message?: string; stdout?: string; stderr?: string; killed?: boolean };
       return {
         exitCode: err.status ?? -1,
         stdout: err.stdout ?? "",
         stderr: err.stderr ?? err.message ?? "",
-        timedOut: err.message?.includes("timeout") ?? false,
+        timedOut: err.killed ?? err.message?.includes("timeout") ?? false,
         durationMs: Date.now() - startTime,
       };
     }
@@ -113,21 +149,27 @@ export class SandboxManager implements ISandboxManager {
 
   async readFile(sessionId: string, filePath: string): Promise<string> {
     const { readFileSync } = await import("fs");
-    const fullPath = filePath.startsWith("/") ? filePath : `${this.localWorkDir}/${filePath}`;
+    const instance = this.pool.get(`local-${sessionId}`);
+    const workDir = instance?.workDir || this.localWorkDir;
+    const fullPath = filePath.startsWith("/") ? filePath : `${workDir}/${filePath}`;
     return readFileSync(fullPath, "utf-8");
   }
 
   async writeFile(sessionId: string, filePath: string, content: string): Promise<void> {
     const { writeFileSync, mkdirSync } = await import("fs");
     const { dirname } = await import("path");
-    const fullPath = filePath.startsWith("/") ? filePath : `${this.localWorkDir}/${filePath}`;
+    const instance = this.pool.get(`local-${sessionId}`);
+    const workDir = instance?.workDir || this.localWorkDir;
+    const fullPath = filePath.startsWith("/") ? filePath : `${workDir}/${filePath}`;
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, content, "utf-8");
   }
 
   async listDir(sessionId: string, dirPath: string): Promise<string[]> {
     const { readdirSync } = await import("fs");
-    const fullPath = dirPath.startsWith("/") ? dirPath : `${this.localWorkDir}/${dirPath}`;
+    const instance = this.pool.get(`local-${sessionId}`);
+    const workDir = instance?.workDir || this.localWorkDir;
+    const fullPath = dirPath.startsWith("/") ? dirPath : `${workDir}/${dirPath}`;
     return readdirSync(fullPath);
   }
 
@@ -146,6 +188,14 @@ export class SandboxManager implements ISandboxManager {
   }
 
   async dispose(): Promise<void> {
+    if (this.isolatedWorkDir) {
+      try {
+        await rm(this.isolatedWorkDir, { recursive: true, force: true });
+      } catch {
+        // ignore cleanup errors
+      }
+      this.isolatedWorkDir = null;
+    }
     this.pool.clear();
     this.sessionMap.clear();
     this.initialized = false;

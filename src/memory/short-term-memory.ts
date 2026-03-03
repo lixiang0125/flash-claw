@@ -15,7 +15,7 @@ export interface ShortTermMemoryConfig {
 }
 
 const DEFAULT_STM_CONFIG: ShortTermMemoryConfig = {
-  expirationMs: 24 * 60 * 60 * 1000,
+  expirationMs: parseInt(process.env.SESSION_TIMEOUT || "1800000", 10),
   maxMessagesPerSession: 200,
   cleanupIntervalMs: 60 * 60 * 1000,
 };

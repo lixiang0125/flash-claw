@@ -31,7 +31,7 @@ import {
   type ToolExecutor as IToolExecutor,
   type IEmbeddingService,
   type IVectorStore,
-  type ILonTermMemory,
+  type ILongTermMemory,
   type IMemoryManager,
   type IPromptBuilder,
   type IContextBudget,

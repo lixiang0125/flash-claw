@@ -132,7 +132,7 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
     return output.content || `No content extracted from ${output.url}`;
   },
   execute: async (input: { url: string; extractMainContent?: boolean; maxLength?: number; usePlaywright?: boolean }, _context: ToolExecutionContext): Promise<WebFetchOutput> => {
-    const ssrfCheck = defaultSSRFProtection.check(input.url);
+    const ssrfCheck = await defaultSSRFProtection.checkWithDNS(input.url);
     if (!ssrfCheck.allowed) {
       return {
         success: false,
@@ -191,9 +191,24 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
           "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
         },
-        redirect: "follow",
+        redirect: "manual",
       });
       clearTimeout(timeout);
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (location) {
+          const redirectUrl = new URL(location, input.url).toString();
+          const redirectCheck = await defaultSSRFProtection.checkWithDNS(redirectUrl);
+          if (!redirectCheck.allowed) {
+            return {
+              success: false,
+              url: input.url,
+              error: `SSRF protection (redirect): ${redirectCheck.reason}`,
+            };
+          }
+        }
+      }
 
       if (!response.ok) {
         return {

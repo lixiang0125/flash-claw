@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFile as execFileSync } from "child_process";
+import { promisify } from "util";
+import { validateWritePath } from "../infra/fs/boundary";
+
+const execFile = promisify(execFileSync);
 
 export interface SkillMeta {
   name: string;
@@ -186,11 +190,11 @@ export function searchSkills(query: string): Skill[] {
 /**
  * 执行 Skill 脚本
  */
-export function executeScript(
+export async function executeScript(
   skillName: string,
   scriptName: string,
   args: string[] = []
-): { stdout: string; stderr: string } | null {
+): Promise<{ stdout: string; stderr: string } | null> {
   let skillPath: string | null = null;
 
   for (const baseDir of SKILLS_BASE_DIRS) {
@@ -210,25 +214,34 @@ export function executeScript(
     let stdout = "";
     let stderr = "";
 
+    validateWritePath(skillPath);
+
     if (ext === ".sh" || ext === ".bash") {
-      stdout = execSync(`bash ${skillPath} ${args.join(" ")}`, {
-        encoding: "utf-8",
+      const result = await execFile("bash", [skillPath, ...args], {
         cwd: path.dirname(skillPath),
+        timeout: 30_000,
       });
+      stdout = result.stdout;
+      stderr = result.stderr;
     } else if (ext === ".py") {
-      stdout = execSync(`python ${skillPath} ${args.join(" ")}`, {
-        encoding: "utf-8",
+      const result = await execFile("python", [skillPath, ...args], {
         cwd: path.dirname(skillPath),
+        timeout: 30_000,
       });
+      stdout = result.stdout;
+      stderr = result.stderr;
     } else if (ext === ".js") {
-      stdout = execSync(`node ${skillPath} ${args.join(" ")}`, {
-        encoding: "utf-8",
+      const result = await execFile("node", [skillPath, ...args], {
         cwd: path.dirname(skillPath),
+        timeout: 30_000,
       });
+      stdout = result.stdout;
+      stderr = result.stderr;
     }
 
     return { stdout, stderr };
-  } catch (error: any) {
-    return { stdout: "", stderr: error.message };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    return { stdout: "", stderr: errorMessage };
   }
 }

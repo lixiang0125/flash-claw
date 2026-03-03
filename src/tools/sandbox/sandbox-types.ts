@@ -1,4 +1,5 @@
 export interface SandboxConfig {
+  useDocker: boolean;
   image: string;
   poolMinSize: number;
   poolMaxSize: number;
@@ -36,6 +37,7 @@ export interface PoolStats {
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
+  useDocker: process.env.USE_DOCKER_SANDBOX === "true",
   image: "flashclaw-sandbox:latest",
   poolMinSize: 1,
   poolMaxSize: 5,

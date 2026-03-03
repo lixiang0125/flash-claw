@@ -2,6 +2,9 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import { userProfileStore } from "../profiles";
+import { SecurityLayer } from "../security/security-layer.js";
+
+const securityLayer = new SecurityLayer();
 
 export interface Tool {
   name: string;
@@ -456,6 +459,11 @@ function executeEdit(filePath: string, oldString: string, newString: string): To
  */
 function executeBash(command: string): ToolResult {
   try {
+    const securityCheck = securityLayer.checkCommand(command);
+    if (!securityCheck.allowed) {
+      return { tool: "Bash", output: "", error: `Command blocked: ${securityCheck.reason}` };
+    }
+    
     const output = execSync(command, {
       encoding: "utf-8",
       cwd: process.cwd(),
@@ -463,8 +471,9 @@ function executeBash(command: string): ToolResult {
       maxBuffer: 10 * 1024 * 1024,
     });
     return { tool: "Bash", output: output || "Command executed successfully" };
-  } catch (error: any) {
-    return { tool: "Bash", output: error.stdout || "", error: error.message };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    return { tool: "Bash", output: "", error: errorMessage };
   }
 }
 
