@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { listSkills, type Skill } from "../skills";
 import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
-import { readUser, readSoul, readMemory, extractInfoToRemember, type IMemoryManager, type UserProfile } from "../memory";
+import { type IMemoryManager, type UserProfile } from "../memory";
 import { parseTaskFromMessage, cronToHumanReadable } from "./parsers";
 import { parseTaskWithLLM } from "./llm-parser";
 import type { ChatRequest, ChatResponse } from "./types";
@@ -91,7 +91,6 @@ class ChatEngine {
     console.log("[DEBUG] chat called, tools available:", this.tools.length);
 
     try {
-      const { user, soul, memory } = this.loadContext(sessionId);
       await this.parseAndScheduleTask(message, sessionId);
 
       let relevantMemories = "";
@@ -108,7 +107,7 @@ class ChatEngine {
         }
       }
 
-      const systemPrompt = this.buildSystemPrompt(user, soul, memory, skills) + relevantMemories;
+      const systemPrompt = this.buildSystemPrompt(skills) + relevantMemories;
       
       const messages: any[] = [
         { role: "system", content: systemPrompt },
@@ -198,22 +197,7 @@ class ChatEngine {
     }
   }
 
-  private loadContext(sessionId: string) {
-    const user = readUser();
-    const soul = readSoul();
-    const memory = readMemory();
-    return { user, soul, memory };
-  }
-
   private saveContext(sessionId: string, userId: string, message: string, _response: string) {
-    const info = extractInfoToRemember(message);
-    if (info) {
-      const profile = userProfileStore.get(sessionId);
-      if (profile) {
-        Object.assign(profile, info);
-      }
-    }
-
     if (this.memoryManager) {
       this.memoryManager.storeInteraction(
         {
@@ -227,8 +211,8 @@ class ChatEngine {
     }
   }
 
-  private buildSystemPrompt(user: unknown, soul: unknown, memory: unknown, skills: Skill[]): string {
-    let prompt = (soul as { prompt?: string })?.prompt || "You are a helpful AI assistant.";
+  private buildSystemPrompt(skills: Skill[]): string {
+    let prompt = "You are a helpful AI assistant.";
 
     if (skills.length > 0) {
       const skillDescriptions = skills.map(s => `- ${s.name}: ${s.description}`).join("\n");
@@ -254,14 +238,6 @@ class ChatEngine {
     ].join("\n");
 
     prompt += `\n\n${toolDescriptions}`;
-
-    if (user && (user as { name?: string }).name) {
-      prompt += `\n\nUser's name: ${(user as { name: string }).name}`;
-    }
-
-    if (memory) {
-      prompt += `\n\nUser memory: ${memory}`;
-    }
 
     return prompt;
   }

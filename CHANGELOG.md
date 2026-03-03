@@ -11,33 +11,27 @@ All notable changes to this project will be documented in this file.
   - 添加 `bun test` 脚本
   - 添加 GitHub Actions CI 工作流
   - 创建 `.github/workflows/ci.yml`
+- **H-5**: 合并双重用户画像
+  - 扩展 UserProfile 接口
+  - 使用统一的 UserProfileService
+- **H-6**: 统一记忆系统
+  - 标记 legacy.ts 为 @deprecated
+- **H-7**: 合并 SQLite
+  - tasks 和 heartbeat 默认使用 flashclaw.db
+  - 可通过环境变量配置
 
 **功能增强**:
 
 - **M-12**: 引入 pino 结构化日志
-  - 使用 pino 替代自定义 logger
-  - 开发环境自动使用 pino-pretty
-
 - **M-13**: Feishu Token 并发保护
-  - 添加 tokenRefreshPromise 防止并发刷新
-
 - **M-1, M-2**: SubAgent AbortController 支持
-  - 添加 AbortController 支持取消子智能体
-  - killRun 现在真正中断执行
-
 - **H-8**: 会话内存泄漏修复
-  - ChatEngine 添加会话清理定时器
-  - 30分钟未访问的会话自动清理
-
 - **M-6**: 命令白名单 + shell-quote 解析
-  - 添加 shell-quote 依赖
-  - 使用白名单验证可执行程序
-  - 支持 ls, cat, node, git 等常用命令
 
 **Bug 修复**:
 
-- **H-4**: 标记 Stub 实现
-  - LLMService 和 AgentCoreImpl 标记为 @deprecated
+- **H-4**: 删除废弃的 Stub 文件
+- 删除 llm-service.ts, agent-core.ts 等
 
 ### 安全加固与 Bug 修复 (2026-03-03)
 
