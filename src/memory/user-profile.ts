@@ -4,6 +4,10 @@ import type { Logger } from "./embedding/embedding-service";
 export interface UserProfile {
   userId: string;
   name: string;
+  email?: string;
+  company?: string;
+  role?: string;
+  bio?: string;
   preferredModel: string;
   language: string;
   communicationStyle: string;
@@ -80,7 +84,6 @@ export class UserProfileService {
 
     this.saveProfile(updated);
     this.cache.set(userId, updated);
-
     this.logger.debug(`UserProfile updated for ${userId}`);
   }
 
@@ -109,15 +112,76 @@ export class UserProfileService {
     }
   }
 
+  get(sessionId: string): UserProfile | null {
+    return this.getProfile(sessionId) as unknown as UserProfile | null;
+  }
+
+  getOrCreate(sessionId: string): UserProfile {
+    return this.getProfile(sessionId) as unknown as UserProfile;
+  }
+
+  async update(sessionId: string, updates: Partial<Pick<UserProfile, "name" | "email" | "company" | "role" | "bio" | "preferences">>): Promise<UserProfile | null> {
+    const userId = sessionId;
+    const updatesToApply: Partial<UserProfile> = {};
+      
+    if (updates.name !== undefined) updatesToApply.name = updates.name;
+    if (updates.email !== undefined) updatesToApply.email = updates.email;
+    if (updates.company !== undefined) updatesToApply.company = updates.company;
+    if (updates.role !== undefined) updatesToApply.role = updates.role;
+    if (updates.bio !== undefined) updatesToApply.bio = updates.bio;
+    if (updates.preferences !== undefined) updatesToApply.preferences = updates.preferences;
+
+    if (Object.keys(updatesToApply).length > 0) {
+      await this.updateProfile(userId, updatesToApply);
+    }
+    
+    return this.getProfile(userId);
+  }
+
+  async appendPreference(sessionId: string, key: string, value: string): Promise<UserProfile | null> {
+    const profile = await this.getProfile(sessionId);
+    const newPrefs = { ...profile.preferences, [key]: value };
+    await this.updateProfile(sessionId, { preferences: newPrefs });
+    return this.getProfile(sessionId);
+  }
+
+  toMarkdown(profile: UserProfile | null): string {
+    if (!profile) {
+      return "暂无用户信息";
+    }
+
+    if (!profile.name && !profile.email && !profile.company && !profile.role && !profile.bio && Object.keys(profile.preferences).length === 0) {
+      return "暂无用户信息";
+    }
+
+    let md = "# 用户画像\n\n";
+
+    if (profile.name) md += `- **名字**: ${profile.name}\n`;
+    if (profile.email) md += `- **邮箱**: ${profile.email}\n`;
+    if (profile.company) md += `- **公司**: ${profile.company}\n`;
+    if (profile.role) md += `- **职位**: ${profile.role}\n`;
+    if (profile.bio) md += `\n## 个人简介\n${profile.bio}\n`;
+    if (Object.keys(profile.preferences).length > 0) md += `\n## 偏好设置\n`;
+    for (const [key, value] of Object.entries(profile.preferences)) {
+      md += `- **${key}**: ${value}\n`;
+    }
+
+    return md;
+  }
+
   private saveProfile(profile: UserProfile): void {
     this.db.run(
       `INSERT OR REPLACE INTO user_profiles
-        (user_id, name, preferred_model, language, communication_style,
+        (user_id, name, email, company, role, bio, preferred_model, language, communication_style,
          timezone, key_facts, frequent_tools, preferences, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.userId,
         profile.name,
+        profile.email || null,
+        profile.company || null,
+        profile.role || null,
+        profile.bio || null,
         profile.preferredModel,
         profile.language,
         profile.communicationStyle,
@@ -135,6 +199,10 @@ export class UserProfileService {
     return {
       userId: row.user_id as string,
       name: row.name as string,
+      email: row.email as string | undefined,
+      company: row.company as string | undefined,
+      role: row.role as string | undefined,
+      bio: row.bio as string | undefined,
       preferredModel: row.preferred_model as string,
       language: row.language as string,
       communicationStyle: row.communication_style as string,
@@ -152,6 +220,10 @@ export class UserProfileService {
       CREATE TABLE IF NOT EXISTS user_profiles (
         user_id TEXT PRIMARY KEY,
         name TEXT NOT NULL DEFAULT '',
+        email TEXT,
+        company TEXT,
+        role TEXT,
+        bio TEXT,
         preferred_model TEXT NOT NULL DEFAULT 'default',
         language TEXT NOT NULL DEFAULT 'zh-CN',
         communication_style TEXT NOT NULL DEFAULT 'detailed',

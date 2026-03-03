@@ -83,7 +83,9 @@ const longTermMemory = new LongTermMemory(
   logger,
 );
 
-const userProfileService = new UserProfileService(db as any, logger);
+import { getUserProfileService } from "./profiles";
+
+const userProfileService = getUserProfileService(db as any, logger);
 
 const memoryManager = new MemoryManager(
   workingMemory,
