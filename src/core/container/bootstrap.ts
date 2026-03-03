@@ -37,7 +37,6 @@ import {
   type IContextBudget,
 } from "./tokens";
 import { TypedEventBus } from "./event-bus";
-import { createLLMService } from "./llm-service";
 import { createSandboxManager } from "../../tools/sandbox";
 import { ToolRegistry } from "../../tools/tool-registry";
 import { ToolExecutor } from "../../tools/tool-executor";
@@ -208,15 +207,6 @@ export function createContainer(): Container {
       const config = resolver.resolve(CONFIG);
       const logger = resolver.resolve(LOGGER);
       return createDatabase(config, logger);
-    },
-  });
-
-  // 注册 LLM_SERVICE (依赖 CONFIG, LOGGER)
-  container.register({
-    token: LLM_SERVICE,
-    lifecycle: Lifecycle.Singleton,
-    factory: () => {
-      return createLLMService();
     },
   });
 
