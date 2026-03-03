@@ -283,6 +283,7 @@ flash-claw/
 │   │   ├── short-term-memory.ts
 │   │   ├── long-term-memory.ts
 │   │   ├── memory-manager.ts
+│   │   ├── markdown-memory.ts  # Markdown 文件存储
 │   │   ├── context-budget.ts
 │   │   ├── user-profile.ts
 │   │   ├── vector-store.ts
@@ -303,7 +304,7 @@ flash-claw/
 │   └── infra/               # 基础设施
 │       └── hono-app.ts      # Hono 应用创建
 ├── .flashclaw/skills/       # Skills 目录
-├── data/                    # SQLite 数据库
+├── data/                    # SQLite 数据库 + Markdown 记忆
 ├── .env                     # 环境变量 (不提交)
 ├── .env.example             # 环境变量模板
 └── package.json
