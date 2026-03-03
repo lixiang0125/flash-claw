@@ -1,6 +1,9 @@
 import type { AgentCore, AgentResult } from "../container/tokens";
 import type { AgentConfig } from "./types";
 
+/**
+ * @deprecated Use ChatEngine directly for agent operations. This stub is not used.
+ */
 export class AgentCoreImpl implements AgentCore {
   private config: AgentConfig;
 

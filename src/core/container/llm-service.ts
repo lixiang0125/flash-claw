@@ -1,3 +1,6 @@
+/**
+ * @deprecated Use ChatEngine directly for LLM operations. This stub is not used.
+ */
 export interface LLMOptions {
   temperature?: number;
   maxTokens?: number;

@@ -28,9 +28,12 @@ class ChatEngine {
   private client: OpenAI;
   private sessions: Map<string, ChatMessage[]> = new Map();
   private sessionSkills: Map<string, Skill[]> = new Map();
+  private sessionLastAccess: Map<string, number> = new Map();
   private tools: any[] = [];
   private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
   private memoryManager: IMemoryManager | null = null;
+  private readonly SESSION_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -42,6 +45,28 @@ class ChatEngine {
       baseURL,
       apiKey,
     });
+
+    this.startSessionCleanup();
+  }
+
+  private startSessionCleanup(): void {
+    this.cleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [sessionId, lastAccess] of this.sessionLastAccess) {
+        if (now - lastAccess > this.SESSION_MAX_AGE) {
+          this.sessions.delete(sessionId);
+          this.sessionSkills.delete(sessionId);
+          this.sessionLastAccess.delete(sessionId);
+        }
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+  }
+
+  dispose(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
   }
 
   setMemoryManager(manager: IMemoryManager): void {
@@ -276,6 +301,7 @@ class ChatEngine {
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, []);
     }
+    this.sessionLastAccess.set(sessionId, Date.now());
     return this.sessions.get(sessionId)!;
   }
 
@@ -283,6 +309,7 @@ class ChatEngine {
     if (!this.sessionSkills.has(sessionId)) {
       this.sessionSkills.set(sessionId, []);
     }
+    this.sessionLastAccess.set(sessionId, Date.now());
     return this.sessionSkills.get(sessionId)!;
   }
 

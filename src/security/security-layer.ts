@@ -2,6 +2,14 @@ import { glob } from "glob";
 import type { SecurityPolicy, SecurityCheckResult, AuditEntry } from "./types.js";
 import { DEFAULT_SECURITY_POLICY } from "./types.js";
 
+const ALLOWED_EXECUTABLES = new Set([
+  "ls", "cat", "head", "tail", "wc", "grep", "find", "echo",
+  "node", "bun", "python", "python3", "pip", "npm", "npx",
+  "git", "curl", "wget", "jq", "sed", "awk", "sort", "uniq",
+  "mkdir", "rm", "cp", "mv", "touch", "chmod", "chown",
+  "cd", "pwd", "whoami", "date", "true", "false",
+]);
+
 export interface Logger {
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;
@@ -67,6 +75,20 @@ export class SecurityLayer {
   }
 
   checkCommand(command: string): SecurityCheckResult {
+    const blockedCheck = this.checkBlockedCommands(command);
+    if (!blockedCheck.allowed) {
+      return blockedCheck;
+    }
+
+    const whitelistCheck = this.checkWhitelist(command);
+    if (!whitelistCheck.allowed) {
+      return whitelistCheck;
+    }
+
+    return { allowed: true, riskLevel: "none" };
+  }
+
+  private checkBlockedCommands(command: string): SecurityCheckResult {
     for (const blocked of this.policy.blockedCommands) {
       try {
         const regex = new RegExp(blocked, "i");
@@ -82,8 +104,31 @@ export class SecurityLayer {
         continue;
       }
     }
-
     return { allowed: true, riskLevel: "none" };
+  }
+
+  private checkWhitelist(command: string): SecurityCheckResult {
+    try {
+      const { parse } = require("shell-quote");
+      const tokens = parse(command);
+      if (!tokens || tokens.length === 0) {
+        return { allowed: true, riskLevel: "none" };
+      }
+
+      const executable = String(tokens[0]);
+      if (!ALLOWED_EXECUTABLES.has(executable)) {
+        this.logger.warn(`Command not in allowlist: ${executable}`);
+        return {
+          allowed: false,
+          reason: `Executable not in allowlist: ${executable}`,
+          riskLevel: "medium",
+        };
+      }
+
+      return { allowed: true, riskLevel: "none" };
+    } catch {
+      return { allowed: true, riskLevel: "none" };
+    }
   }
 
   checkRateLimit(sessionId: string): SecurityCheckResult {
