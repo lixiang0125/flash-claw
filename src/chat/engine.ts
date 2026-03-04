@@ -95,11 +95,7 @@ class ChatEngine {
 
       let relevantMemories = "";
       if (this.memoryManager) {
-        let searchText = message;
-        const isAskingAboutUser = /我是谁|我的名字|我是谁|我叫|我叫什么|认识我/i.test(message);
-        if (isAskingAboutUser) {
-          searchText = "用户事实 名字 叫 李享 张三 王五 开发者 学生";
-        }
+        const searchText = this.buildMemorySearchText(message);
         
         const memResults = await this.memoryManager.recall({
           text: searchText,
@@ -216,6 +212,32 @@ class ChatEngine {
         _response,
       ).catch(err => console.error("[ChatEngine] Failed to store interaction:", err));
     }
+  }
+
+  private buildMemorySearchText(message: string): string {
+    const msg = message.toLowerCase();
+    
+    if (/我是谁|我的名字|我是谁|我叫|我叫什么|认识我|知道我|who am i|my name/i.test(msg)) {
+      return "用户事实 名字 身份 职业 工作 学习";
+    }
+    
+    if (/记得|之前|以前|上次|从前|曾经|过去|remember|past|before/i.test(msg)) {
+      return "用户事实 用户偏好 对话 历史";
+    }
+    
+    if (/喜欢|偏好|习惯|讨厌|不爱|prefer|like|hate/i.test(msg)) {
+      return "用户偏好 兴趣 习惯";
+    }
+    
+    if (/住在哪里|哪里人|来自|l|居住ive|from|location/i.test(msg)) {
+      return "用户事实 地点 位置 城市";
+    }
+    
+    if (/工作|职业|做什么|做啥|职业|work|job|occupation/i.test(msg)) {
+      return "用户事实 工作 职业 职位";
+    }
+    
+    return message;
   }
 
   private buildSystemPrompt(skills: Skill[]): string {
