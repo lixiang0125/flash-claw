@@ -17,11 +17,8 @@ import {
   HEARTBEAT_SYSTEM,
   SUB_AGENT_SYSTEM,
   HTTP_SERVER,
-  EMBEDDING_SERVICE,
-  VECTOR_STORE,
   WORKING_MEMORY,
   SHORT_TERM_MEMORY,
-  LONG_TERM_MEMORY,
   USER_PROFILE,
   MEMORY_MANAGER,
   CONTEXT_BUDGET,
@@ -36,9 +33,6 @@ import {
   type SandboxManager,
   type ToolRegistry as IToolRegistry,
   type ToolExecutor as IToolExecutor,
-  type IEmbeddingService,
-  type IVectorStore,
-  type ILongTermMemory,
   type IMemoryManager,
   type IPromptBuilder,
   type IContextBudget,
@@ -69,15 +63,11 @@ import { Hono } from "hono";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ChatRequest } from "../../chat/types";
 import pino from "pino";
-import { EmbeddingService } from "../../memory/embedding/embedding-service";
-import { TransformersEmbeddingProvider } from "../../memory/embedding/transformers-provider";
-import { OllamaEmbeddingProvider } from "../../memory/embedding/ollama-provider";
-import { VectorStore } from "../../memory/vector-store";
 import { WorkingMemory } from "../../memory/working-memory";
 import { ShortTermMemory } from "../../memory/short-term-memory";
-import { LongTermMemory } from "../../memory/long-term-memory";
 import { UserProfileService } from "../../memory/user-profile";
-import { MemoryManager } from "../../memory/memory-manager";
+import { Mem0MemoryManager } from "../../memory/mem0-memory-manager";
+import { createMem0Memory } from "../../memory/mem0-factory";
 import { ContextBudget } from "../../memory/context-budget";
 import { MarkdownMemory } from "../../memory/markdown-memory";
 import { SecurityLayer } from "../../security/security-layer";
@@ -316,36 +306,6 @@ export function createContainer(): Container {
 
   // ===== Memory System =====
 
-  // 嵌入服务
-  container.register({
-    token: EMBEDDING_SERVICE,
-    lifecycle: Lifecycle.Singleton,
-    factory: (resolver) => {
-      const logger = resolver.resolve(LOGGER);
-      const mainDb = resolver.resolve(DATABASE);
-      const providers = [
-        new TransformersEmbeddingProvider(),
-        new OllamaEmbeddingProvider(),
-      ];
-      const service = new EmbeddingService(providers, mainDb as any, logger);
-      service.initialize();
-      return service;
-    },
-  });
-
-  // 向量存储
-  container.register({
-    token: VECTOR_STORE,
-    lifecycle: Lifecycle.Singleton,
-    factory: (resolver) => {
-      const logger = resolver.resolve(LOGGER);
-      const mainDb = resolver.resolve(DATABASE);
-      const store = new VectorStore(mainDb as any, logger, { dimensions: 384 });
-      store.initialize();
-      return store;
-    },
-  });
-
   // 工作记忆
   container.register({
     token: WORKING_MEMORY,
@@ -403,24 +363,6 @@ export function createContainer(): Container {
     },
   });
 
-  // 长期记忆
-  container.register({
-    token: LONG_TERM_MEMORY,
-    lifecycle: Lifecycle.Singleton,
-    factory: (resolver) => {
-      const logger = resolver.resolve(LOGGER);
-      const mainDb = resolver.resolve(DATABASE);
-      const vectorStore = resolver.resolve(VECTOR_STORE);
-      const embeddingService = resolver.resolve(EMBEDDING_SERVICE);
-      return new LongTermMemory(
-        vectorStore as any,
-        embeddingService as any,
-        mainDb as any,
-        logger,
-      );
-    },
-  });
-
   // 用户画像
   container.register({
     token: USER_PROFILE,
@@ -432,7 +374,7 @@ export function createContainer(): Container {
     },
   });
 
-  // 记忆管理器
+  // 记忆管理器 (mem0)
   container.register({
     token: MEMORY_MANAGER,
     lifecycle: Lifecycle.Singleton,
@@ -440,14 +382,16 @@ export function createContainer(): Container {
       const logger = resolver.resolve(LOGGER);
       const workingMemory = resolver.resolve(WORKING_MEMORY);
       const shortTermMemory = resolver.resolve(SHORT_TERM_MEMORY);
-      const longTermMemory = resolver.resolve(LONG_TERM_MEMORY);
+      const markdownMemory = resolver.resolve(MARKDOWN_MEMORY);
       const userProfile = resolver.resolve(USER_PROFILE);
-      return new MemoryManager(
+      const mem0Memory = createMem0Memory(logger);
+      return new Mem0MemoryManager(
+        logger,
         workingMemory as any,
         shortTermMemory as any,
-        longTermMemory as any,
+        mem0Memory,
+        markdownMemory as any,
         userProfile as any,
-        logger,
       );
     },
   });

@@ -1,6 +1,61 @@
 # Changelog
 
+## 2026-03-04
+
+**Changed files:**
+- CHANGELOG.md
+- README.md
+- bun.lock
+- package.json
+- src/core/container/bootstrap.ts
+- src/memory/index.ts
+- memory.db
+- src/memory/mem0-embedder-patch.ts
+- src/memory/mem0-factory.ts
+- src/memory/mem0-memory-manager.ts
+- vector_store.db
+
+# Changelog
+
 All notable changes to this project will be documented in this file.
+
+### mem0 记忆系统接入 (2026-03-04)
+
+**重构完成**:
+
+- **M-31**: 使用 mem0ai OSS 本地模式替代自研 LongTermMemory
+- **M-32**: LLM 使用 qwen3.5-plus (dashscope)，支持智能记忆抽取
+- **M-33**: Embedding 使用 text-embedding-v3，本地 SQLite 向量存储
+- **M-34**: 修复 mem0 OpenAIEmbedder baseURL bug (monkey-patch)
+- **M-35**: 删除 @xenova/transformers 和 sqlite-vec 依赖，减小项目体积
+
+**架构变更**:
+
+```
+接入前                                    接入后
+───────────────────────────              ────────────────────────────
+ChatEngine                                ChatEngine
+  └─ MemoryManager                          └─ Mem0MemoryManager
+       ├─ WorkingMemory (T0, 内存)               ├─ WorkingMemory (T0, 保留)
+       ├─ ShortTermMemory (T1, SQLite)           ├─ ShortTermMemory (T1, 保留)
+       ├─ LongTermMemory (T2)                    ├─ mem0 Memory (替代 T2)
+       │    ├─ VectorStore (sqlite-vec+FTS5)     │    ├─ LLM: qwen3.5-plus
+       │    └─ EmbeddingService                  │    ├─ Embedder: text-embedding-v3
+       │         ├─ TransformersProvider         │    └─ VectorStore: SQLite 本地
+       │         └─ OllamaProvider               ├─ MarkdownMemory (T3, 仅归档)
+       └─ MarkdownMemory (T3)                    └─ UserProfile (保留)
+            └─ UserProfile
+```
+
+**依赖变更**:
+
+| 依赖 | 变化 |
+|------|------|
+| mem0ai | 新增 |
+| @xenova/transformers | 移除 (~200MB) |
+| sqlite-vec | 移除 |
+
+---
 
 ### Markdown 记忆系统集成 (2026-03-04)
 

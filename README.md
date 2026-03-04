@@ -8,7 +8,7 @@
 - **Web 框架**: Hono
 - **AI**: OpenAI SDK (DashScope 阿里云百炼) + Qwen Function Calling
 - **前端**: React 19 + Vite
-- **数据库**: SQLite (bun:sqlite) + sqlite-vec (向量搜索)
+- **数据库**: SQLite (bun:sqlite) + mem0 (本地向量搜索)
 - **DI 容器**: 自研 IoC 容器 (Singleton/Transient/Scoped 生命周期)
 
 ## 功能特性
@@ -71,13 +71,10 @@ Container
 ├── SANDBOX_MANAGER # 工具执行沙箱
 ├── TOOL_REGISTRY  # 工具注册表
 ├── TOOL_EXECUTOR  # 工具执行器
-├── EMBEDDING_SERVICE # 嵌入服务
-├── VECTOR_STORE   # 向量存储
 ├── WORKING_MEMORY # 工作记忆
 ├── SHORT_TERM_MEMORY # 短期记忆
-├── LONG_TERM_MEMORY # 长期记忆
 ├── USER_PROFILE   # 用户画像
-├── MEMORY_MANAGER # 记忆管理器
+├── MEMORY_MANAGER # 记忆管理器 (mem0)
 ├── CONTEXT_BUDGET # 上下文预算
 ├── PROMPT_BUILDER # 提示词构建
 ├── CHAT_ENGINE    # 对话引擎
@@ -105,15 +102,15 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 |------|------|----------|----------|
 | T0 | WorkingMemory | 内存 | 当前会话 |
 | T1 | ShortTermMemory | SQLite | 30分钟自动过期 |
-| T2 | LongTermMemory | SQLite 向量库 | 永久 |
+| T2 | mem0 Memory | SQLite 向量库 (mem0) | 永久 |
 | T3 | MarkdownMemory | Markdown 文件 | 永久 |
 
 **核心设计理念**：
 
 - **文件即真相**：Markdown 文件是记忆的真实来源，数据库是派生索引，可随时重建
-- **LLM 自主判断**：不通过关键词判断什么该记住，由 LLM 决定（参考 OpenClaw 设计）
-- **优雅降级**：向量搜索失败 → 关键字搜索 → 用户仍可直接读取 Markdown 文件
-- **本地优先**：嵌入模型可选本地 Transformers.js / Ollama，数据不出本地
+- **LLM 自主判断**：不通过关键词判断什么该记住，由 LLM 决定（使用 mem0 的 LLM 抽取能力）
+- **优雅降级**：向量搜索失败 → 用户仍可直接读取 Markdown 文件
+- **本地优先**：使用 mem0 OSS 本地模式，数据完全存储在本地 SQLite
 
 **5 种记忆写入触发路径**（参考 OpenClaw）：
 
