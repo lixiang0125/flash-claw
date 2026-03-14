@@ -1,10 +1,8 @@
 import OpenAI from "openai";
 import { listSkills, type Skill } from "../skills";
-import { taskScheduler } from "../tasks";
 import { userProfileStore } from "../profiles";
 import { type IMemoryManager, type UserProfile } from "../memory";
 import { parseTaskFromMessage, cronToHumanReadable } from "./parsers";
-import { parseTaskWithLLM } from "./llm-parser";
 import type { ChatRequest, ChatResponse } from "./types";
 import { ErrorSanitizer } from "../infra/error-handler";
 
@@ -24,6 +22,15 @@ interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+/**
+ * Task scheduler interface — injected via setTaskScheduler().
+ * The engine no longer hard-imports taskScheduler.
+ */
+interface TaskSchedulerAPI {
+  createTask(task: { name: string; message: string; schedule: string; enabled: boolean }): unknown;
+  createOneTimeTask(task: { name: string; message: string; executeAfter: number }): unknown;
+}
+
 class ChatEngine {
   private client: OpenAI;
   private sessions: Map<string, ChatMessage[]> = new Map();
@@ -32,6 +39,7 @@ class ChatEngine {
   private tools: any[] = [];
   private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
   private memoryManager: IMemoryManager | null = null;
+  private taskSchedulerAPI: TaskSchedulerAPI | null = null;
   private readonly SESSION_MAX_AGE = 30 * 60 * 1000; // 30 minutes
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -74,6 +82,11 @@ class ChatEngine {
     console.log("[ChatEngine] MemoryManager attached");
   }
 
+  setTaskScheduler(api: TaskSchedulerAPI): void {
+    this.taskSchedulerAPI = api;
+    console.log("[ChatEngine] TaskScheduler attached");
+  }
+
   setTools(tools: any[]): void {
     this.tools = tools;
     console.log("[DEBUG] setTools called with:", tools.length, "tools");
@@ -91,32 +104,41 @@ class ChatEngine {
     console.log("[DEBUG] chat called, tools available:", this.tools.length);
 
     try {
-      await this.parseAndScheduleTask(message, sessionId);
+      // Parse and schedule task — result is injected into LLM response if non-null
+      const taskResult = await this.parseAndScheduleTask(message, sessionId);
 
       let relevantMemories = "";
       if (this.memoryManager) {
         const searchText = this.buildMemorySearchText(message);
-        
+
         const memResults = await this.memoryManager.recall({
           text: searchText,
           userId,
           sessionId,
           limit: 5,
         });
-        console.log("[DEBUG] memories found:", memResults.length, memResults.map(m => m.entry.content));
+        console.log("[DEBUG] memories found:", memResults.length, (memResults as any[]).map((m: any) => m.entry.content));
         if (memResults.length > 0) {
-          relevantMemories = "\n\n## 相关记忆\n" + 
-            memResults.map(m => `- ${m.entry.content}`).join("\n");
+          relevantMemories = "\n\n## 相关记忆\n" +
+            (memResults as any[]).map((m: any) => `- ${m.entry.content}`).join("\n");
         }
       }
 
       const systemPrompt = this.buildSystemPrompt(skills) + relevantMemories;
-      
+
       const messages: any[] = [
         { role: "system", content: systemPrompt },
         ...history,
         { role: "user", content: message },
       ];
+
+      // If a task was created, inject it as context so the LLM can acknowledge it
+      if (taskResult) {
+        messages.push({
+          role: "system",
+          content: `[System] 用户的消息已被识别为任务调度请求，已自动创建: ${taskResult}\n请在回复中确认任务创建成功，并告知用户任务详情。`,
+        });
+      }
 
       let iterations = 0;
       let lastResponse = "";
@@ -216,27 +238,27 @@ class ChatEngine {
 
   private buildMemorySearchText(message: string): string {
     const msg = message.toLowerCase();
-    
-    if (/我是谁|我的名字|我是谁|我叫|我叫什么|认识我|知道我|who am i|my name/i.test(msg)) {
+
+    if (/我是谁|我的名字|我叫|我叫什么|认识我|知道我|who am i|my name/i.test(msg)) {
       return "用户事实 名字 身份 职业 工作 学习";
     }
-    
+
     if (/记得|之前|以前|上次|从前|曾经|过去|remember|past|before/i.test(msg)) {
       return "用户事实 用户偏好 对话 历史";
     }
-    
+
     if (/喜欢|偏好|习惯|讨厌|不爱|prefer|like|hate/i.test(msg)) {
       return "用户偏好 兴趣 习惯";
     }
-    
-    if (/住在哪里|哪里人|来自|l|居住ive|from|location/i.test(msg)) {
+
+    if (/住在哪里|哪里人|来自|居住|live|from|location/i.test(msg)) {
       return "用户事实 地点 位置 城市";
     }
-    
-    if (/工作|职业|做什么|做啥|职业|work|job|occupation/i.test(msg)) {
+
+    if (/工作|职业|做什么|做啥|work|job|occupation/i.test(msg)) {
       return "用户事实 工作 职业 职位";
     }
-    
+
     return message;
   }
 
@@ -271,32 +293,43 @@ class ChatEngine {
     return prompt;
   }
 
-  private async parseAndScheduleTask(message: string, sessionId: string): Promise<string | null> {
-    const task = parseTaskFromMessage(message);
-    if (task) {
-      const schedule = task.schedule ? cronToHumanReadable(task.schedule) : "";
-      await taskScheduler.createTask({
-        name: task.name,
-        message: task.message,
-        schedule: task.schedule ?? "",
-        enabled: true,
-      });
-      return `已创建任务: ${task.name} - ${schedule}`;
+  /**
+   * Parse user message for task scheduling intent.
+   * Handles both one-time (executeAfter) and recurring (cron) tasks.
+   * Returns a human-readable summary string if a task was created, null otherwise.
+   */
+  private async parseAndScheduleTask(message: string, _sessionId: string): Promise<string | null> {
+    if (!this.taskSchedulerAPI) {
+      return null; // TaskScheduler not wired yet
     }
 
+    const task = parseTaskFromMessage(message);
+    if (!task) return null;
+
     try {
-      const result = await parseTaskWithLLM(message);
-      if (result) {
-        await taskScheduler.createTask({
-          name: result.name,
-          message: result.message,
-          schedule: result.schedule ?? "",
+      if (task.type === "once" && task.executeAfter) {
+        // One-time delayed task
+        this.taskSchedulerAPI.createOneTimeTask({
+          name: task.name,
+          message: task.message,
+          executeAfter: task.executeAfter,
+        });
+        const minutes = Math.round(task.executeAfter / 60000);
+        return `定时任务「${task.name}」- ${minutes}分钟后执行`;
+      } else if (task.type === "recurring" && task.schedule) {
+        // Recurring cron task
+        this.taskSchedulerAPI.createTask({
+          name: task.name,
+          message: task.message,
+          schedule: task.schedule,
           enabled: true,
         });
-        return `已创建任务: ${result.name}`;
+        const humanSchedule = cronToHumanReadable(task.schedule);
+        return `定时任务「${task.name}」- ${humanSchedule}`;
       }
-    } catch (error) {
-      console.error("Task parsing error:", error);
+    } catch (error: any) {
+      console.error("[ChatEngine] Task creation failed:", error.message);
+      return null;
     }
 
     return null;

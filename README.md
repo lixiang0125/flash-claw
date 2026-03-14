@@ -17,7 +17,7 @@
 - AI 对话：智能理解用户意图，支持多会话管理
 - 工具执行：内置 7 种工具（搜索、文件读写、代码执行等）
 - Skill 系统：支持自定义技能扩展，符合 Claude Code Agent Skills 标准
-- 任务调度：定时任务提醒，LLM 智能解析
+- 任务调度：定时任务与一次性提醒，regex 解析 + DI 驱动执行，支持 cron 表达式与自然语言
 - 飞书集成：Webhook + 长连接两种模式
 - 记忆系统：三级记忆体系 (Working/ShortTerm/LongTerm)
 - 子智能体：复杂任务自动拆分处理，支持 AbortController

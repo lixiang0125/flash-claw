@@ -490,6 +490,10 @@ export function createContainer(): Container {
         return { result: execResult.output, error: execResult.error || undefined };
       });
       chatEngine.setMemoryManager(memoryManager as any);
+
+      // Wire task scheduler API so engine can create tasks from parsed messages
+      chatEngine.setTaskScheduler(taskScheduler as any);
+
       logger.info("ChatEngine initialized with tools", { toolCount: qwenTools.length });
 
       return chatEngine as any;
@@ -563,6 +567,37 @@ export async function bootstrap(): Promise<Container> {
 
   // 异步初始化所有服务
   await container.initializeAll();
+
+  // Wire TaskScheduler executor & notifier, then start
+  try {
+    const ts = container.resolve(TASK_SCHEDULER) as any;
+    const ce = container.resolve(CHAT_ENGINE) as any;
+    const fb = container.resolve(FEISHU_BOT) as any;
+    const tsLogger = container.resolve(LOGGER);
+
+    ts.setExecutor(async (taskMessage: string, taskId: string) => {
+      tsLogger.info(`[TaskScheduler] Executing task ${taskId}`);
+      const result = await ce.chat({ message: taskMessage, sessionId: `task_${taskId}` });
+      return (result as any).response || String(result);
+    });
+
+    ts.setNotifier(async (taskName: string, result: string) => {
+      if (fb.isConfigured()) {
+        try {
+          const summary = result.length > 500 ? result.slice(0, 500) + "..." : result;
+          await fb.sendMessage?.(`✅ 任务「${taskName}」执行完成:\n${summary}`);
+        } catch (e) {
+          tsLogger.error("[TaskScheduler] Notification send failed", { err: e });
+        }
+      }
+    });
+
+    ts.start();
+    tsLogger.info("TaskScheduler wired and started");
+  } catch (err) {
+    const logger = container.resolve(LOGGER);
+    logger.error("TaskScheduler wiring failed (non-fatal)", { err });
+  }
 
   // Periodic consolidation: extract durable facts from daily logs to MEMORY.md
   // Runs once on startup if last consolidation was > 24h ago

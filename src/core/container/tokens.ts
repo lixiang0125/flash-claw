@@ -260,11 +260,16 @@ export const FEISHU_BOT: ServiceToken<IFeishuBot> =
 export interface ITaskScheduler {
   listTasks(): unknown[];
   createTask(task: unknown): unknown;
+  createOneTimeTask(task: { name: string; message: string; executeAfter: number }): unknown;
   getTask(id: string): unknown;
   updateTask(id: string, updates: unknown): unknown;
   deleteTask(id: string): boolean;
   runTask(id: string): Promise<unknown>;
   getTaskRuns(id: string): unknown[];
+  setExecutor(fn: (taskMessage: string, taskId: string) => Promise<string>): void;
+  setNotifier(fn: (taskName: string, result: string) => Promise<void>): void;
+  start(): void;
+  stop(): void;
 }
 
 export const TASK_SCHEDULER: ServiceToken<ITaskScheduler> =

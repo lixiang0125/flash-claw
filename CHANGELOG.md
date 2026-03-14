@@ -1,5 +1,55 @@
 # Changelog
 
+## 2026-03-14 (7)
+
+### Cron task system audit & fix
+
+**Problem**: The cron/task subsystem had multiple critical bugs — circular dependency with chatEngine, no concurrency guard, setTimeout overflow for long delays, false-positive task parsing, and no DI wiring.
+
+**Changes**:
+
+- **`src/tasks/index.ts`** (rewritten):
+  - Replaced hard imports of chatEngine/feishuBot with DI callbacks (`setExecutor()`, `setNotifier()`)
+  - `start()` is now explicit (no longer auto-called in constructor)
+  - Added concurrent execution guard (`executing: Set<string>`)
+  - Capped `setTimeout` at 24h with re-evaluation (avoids JS 2^31 ms overflow)
+  - One-time tasks disabled instead of deleted (preserves run history)
+  - Cron validation on create/update via `CronExpressionParser.parse()`
+  - `pollMissedTasks()` respects executing guard
+  - Added `ON DELETE CASCADE` for task_runs foreign key
+
+- **`src/chat/parsers.ts`** (rewritten):
+  - Added TASK_INTENT gate (must contain task-intent keywords to avoid false positives)
+  - One-time patterns require explicit "后/之后" suffix
+  - Reasonable bounds: minutes 1-10080, hours 1-168, days 1-30
+  - Weekly patterns: "每周一/二/三..." with proper day-of-week mapping
+  - AM/PM handling: "下午3点" -> hour 15, "晚上8点" -> hour 20
+  - Minute precision: "每天9:30" -> `30 9 * * *`
+  - Fixed `cronToHumanReadable` to handle all patterns including weekly
+
+- **`src/chat/engine.ts`** (fixed):
+  - Removed hard `taskScheduler` import (was a circular dependency risk)
+  - Added `setTaskScheduler()` DI method
+  - `parseAndScheduleTask()` now differentiates one-time (`createOneTimeTask`) vs recurring (`createTask`)
+  - Task creation result injected into LLM context for user acknowledgment
+
+- **`src/chat/llm-parser.ts`** (cleaned up):
+  - Removed dead keyword check that always returned null
+  - Documented as intentional no-op stub for future LLM-based parsing
+
+- **`src/core/container/bootstrap.ts`** (wiring):
+  - Wires `taskScheduler.setExecutor()` with chatEngine callback
+  - Wires `taskScheduler.setNotifier()` with feishuBot callback
+  - Calls `taskScheduler.start()` after container init
+  - Calls `chatEngine.setTaskScheduler()` in CHAT_ENGINE factory
+
+- **`src/infra/hono-app.ts`** (API update):
+  - `POST /api/tasks` now accepts `executeAfter` (ms) for one-time tasks
+  - Validates: must provide either `schedule` (cron) or `executeAfter`, not neither
+
+- **`src/core/container/tokens.ts`** (interface update):
+  - `ITaskScheduler`: Added `createOneTimeTask`, `setExecutor`, `setNotifier`, `start`, `stop`
+
 ## 2026-03-14 (6)
 
 ### Session-reset save + periodic consolidation to MEMORY.md

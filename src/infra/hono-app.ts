@@ -16,6 +16,7 @@ interface AppServices {
   taskScheduler: {
     listTasks(): unknown[];
     createTask(task: unknown): unknown;
+    createOneTimeTask(task: { name: string; message: string; executeAfter: number }): unknown;
     getTask(id: string): unknown;
     updateTask(id: string, updates: unknown): unknown;
     deleteTask(id: string): boolean;
@@ -137,22 +138,39 @@ export function createHonoApp(services: AppServices): Hono {
     const body = await c.req.json<{
       name: string;
       message: string;
-      schedule: string;
+      schedule?: string;
+      executeAfter?: number;
       enabled?: boolean;
     }>();
 
-    if (!body.name || !body.message || !body.schedule) {
-      return c.json({ error: "name, message, and schedule are required" }, 400);
+    if (!body.name || !body.message) {
+      return c.json({ error: "name and message are required" }, 400);
+    }
+
+    // Must provide either schedule (cron) or executeAfter (ms delay), not both
+    if (!body.schedule && !body.executeAfter) {
+      return c.json({ error: "Either schedule (cron) or executeAfter (ms) is required" }, 400);
     }
 
     try {
-      const task = taskScheduler.createTask({
-        name: body.name,
-        message: body.message,
-        schedule: body.schedule,
-        enabled: body.enabled ?? true,
-      });
-      return c.json({ task });
+      if (body.executeAfter) {
+        // One-time delayed task
+        const task = taskScheduler.createOneTimeTask({
+          name: body.name,
+          message: body.message,
+          executeAfter: body.executeAfter,
+        });
+        return c.json({ task });
+      } else {
+        // Recurring cron task
+        const task = taskScheduler.createTask({
+          name: body.name,
+          message: body.message,
+          schedule: body.schedule!,
+          enabled: body.enabled ?? true,
+        });
+        return c.json({ task });
+      }
     } catch (error: unknown) {
       return c.json({ error: (error as Error).message }, 400);
     }
