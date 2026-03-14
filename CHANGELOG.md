@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-03-14 (6)
+
+### Session-reset save + periodic consolidation to MEMORY.md
+
+**Core changes**:
+
+1. **Session-reset save (OpenClaw trigger #3)**: When a session is cleared
+   (via `/api/chat/clear` or session timeout), all remaining messages are
+   flushed through the agentic memory extraction pipeline before wiping.
+   This ensures no conversation is lost on reset.
+
+2. **Periodic consolidation**: On startup, the system checks if MEMORY.md
+   was last consolidated before today. If so, it reads the last 7 days of
+   daily `.md` logs, sends them to the LLM to extract durable facts (identity,
+   preferences, projects, decisions), and appends new findings to MEMORY.md.
+   Consolidation markers (`<!-- Consolidated: YYYY-MM-DD -->`) prevent
+   redundant runs.
+
+**Modified files**:
+
+| File | Change |
+|------|--------|
+| `src/memory/working-memory.ts` | New `resetSession()` flushes all messages then clears |
+| `src/memory/mem0-memory-manager.ts` | New `resetSession()` delegates to WorkingMemory |
+| `src/chat/engine.ts` | `clearSession()` now async, calls `resetSession` first |
+| `src/infra/hono-app.ts` | `/api/chat/clear` endpoint awaits clearSession |
+| `src/core/container/tokens.ts` | Updated IMemoryManager, IChatEngine, IMarkdownMemory |
+| `src/memory/daily-summarizer.ts` | New `consolidateDailyLogs()` for MEMORY.md extraction |
+| `src/memory/markdown-memory.ts` | New `readMemoryFile()`, `appendConsolidatedMemory()`, `getLastConsolidationDate()` |
+| `src/core/container/init.ts` | Post-init startup consolidation with 24h guard |
+
+**4 memory write triggers now fully implemented** (OpenClaw-inspired):
+
+| # | Trigger | Status |
+|---|---------|--------|
+| 1 | User explicit command | Existing (mem0 `add`) |
+| 2 | Pre-compaction agentic flush | Done in (5) |
+| 3 | Session save on reset | **NEW** |
+| 4 | Periodic consolidation to MEMORY.md | **NEW** |
+
+
 ## 2026-03-14 (5)
 
 ### Pre-compaction Agentic Flush (OpenClaw style)

@@ -124,6 +124,27 @@ export class WorkingMemory {
     this.sessions.delete(sessionId);
   }
 
+  /**
+   * Reset a session: flush all remaining messages through the memory extraction
+   * pipeline before clearing. This is OpenClaw's "session save on reset" trigger.
+   */
+  async resetSession(sessionId: string): Promise<void> {
+    if (this.flushCallback) {
+      const messages = this.getMessages(sessionId);
+      if (messages.length > 0) {
+        const userAssistantMsgs = messages.filter(
+          (m) => m.role === "user" || m.role === "assistant",
+        );
+        if (userAssistantMsgs.length > 0) {
+          await this.flushCallback(sessionId, userAssistantMsgs);
+        }
+      }
+    }
+    this.sessions.delete(sessionId);
+    this.compactionCount.delete(sessionId);
+    this.hasFlushedInCompaction.delete(sessionId);
+  }
+
   clearAll(): void {
     this.sessions.clear();
   }

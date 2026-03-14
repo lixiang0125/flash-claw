@@ -6,7 +6,7 @@ import type { Logger } from "../core/container/tokens";
 interface AppServices {
   chatEngine: {
     chat(request: ChatRequest): Promise<unknown>;
-    clearSession(sessionId: string): void;
+    clearSession(sessionId: string): void | Promise<void>;
   };
   feishuBot: {
     handleEvent(body: unknown): Promise<unknown>;
@@ -66,7 +66,7 @@ export function createHonoApp(services: AppServices): Hono {
       return c.json({ error: "sessionId is required" }, 400);
     }
 
-    chatEngine.clearSession(body.sessionId);
+    await chatEngine.clearSession(body.sessionId);
     return c.json({ success: true });
   });
 

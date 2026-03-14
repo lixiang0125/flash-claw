@@ -564,6 +564,34 @@ export async function bootstrap(): Promise<Container> {
   // 异步初始化所有服务
   await container.initializeAll();
 
+  // Periodic consolidation: extract durable facts from daily logs to MEMORY.md
+  // Runs once on startup if last consolidation was > 24h ago
+  try {
+    const markdownMemory = container.resolve(MARKDOWN_MEMORY);
+    const logger = container.resolve(LOGGER);
+    const lastDate = await markdownMemory.getLastConsolidationDate();
+    const today = new Date().toISOString().split("T")[0]!;
+    const shouldConsolidate = !lastDate || lastDate < today;
+    
+    if (shouldConsolidate) {
+      const dailyLogs = await markdownMemory.getDailyLogs(7);
+      if (dailyLogs.length > 0) {
+        const existingMemory = await markdownMemory.readMemoryFile();
+        const dailySummarizer = new DailySummarizer(logger);
+        const newFacts = await dailySummarizer.consolidateDailyLogs(dailyLogs, existingMemory);
+        if (newFacts) {
+          await markdownMemory.appendConsolidatedMemory(newFacts);
+          logger.info("Startup consolidation: new facts added to MEMORY.md");
+        } else {
+          logger.debug("Startup consolidation: nothing new to add");
+        }
+      }
+    }
+  } catch (err) {
+    const logger = container.resolve(LOGGER);
+    logger.error("Startup memory consolidation failed (non-fatal)", { err });
+  }
+
   // 触发系统就绪事件
   const eventBus = container.resolve(EVENT_BUS);
   eventBus.emit("system:ready", { timestamp: Date.now() });

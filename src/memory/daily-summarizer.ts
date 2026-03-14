@@ -154,4 +154,67 @@ Daily digest:`;
         .join("\n");
     }
   }
+
+  /**
+   * Periodic consolidation: extract durable facts from daily logs into MEMORY.md.
+   * Compares daily log content against existing long-term memory to avoid duplicates.
+   * 
+   * @param dailyContents Array of daily markdown file contents (most recent first)
+   * @param existingMemory Current content of MEMORY.md
+   * @returns New facts/preferences to append to MEMORY.md, or empty string if nothing new
+   */
+  async consolidateDailyLogs(
+    dailyContents: string[],
+    existingMemory: string,
+  ): Promise<string> {
+    if (dailyContents.length === 0) return "";
+
+    const combinedLogs = dailyContents.join("\n\n---\n\n").slice(0, 8000);
+    const existingSlice = existingMemory.slice(0, 3000);
+
+    const prompt = `You are a long-term memory consolidation agent. Your job is to extract DURABLE facts from recent daily conversation logs and merge them into the user's permanent memory file.
+
+## Existing Long-Term Memory (MEMORY.md):
+${existingSlice || "(empty)"}
+
+## Recent Daily Logs:
+${combinedLogs}
+
+## Rules:
+1. Extract ONLY durable, reusable facts: user identity, preferences, habits, skills, relationships, recurring projects, important decisions
+2. DO NOT extract: transient tasks, debugging details, one-off questions, greetings, temporary context
+3. DO NOT duplicate information already in the existing memory above
+4. Output as Markdown bullet points, grouped under sections: ## People, ## Preferences, ## Projects, ## Decisions, ## Skills, ## Other
+5. Only include sections that have new content
+6. Use the same language as the source material
+7. If nothing new is worth adding, respond with exactly: NO_REPLY
+8. Be very selective — this is permanent memory
+
+New facts to add:`;
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 1500,
+        temperature: 0.2,
+      });
+
+      const result = response.choices[0]?.message?.content?.trim() || "";
+
+      if (result === "NO_REPLY" || result.length < 10) {
+        this.logger.debug("Consolidation: nothing new to add to MEMORY.md");
+        return "";
+      }
+
+      this.logger.info("Consolidation: extracted new durable facts", {
+        resultLength: result.length,
+        dailyLogCount: dailyContents.length,
+      });
+      return result;
+    } catch (err) {
+      this.logger.error("Memory consolidation LLM call failed", { err });
+      return "";
+    }
+  }
 }

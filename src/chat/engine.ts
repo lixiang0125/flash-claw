@@ -318,7 +318,16 @@ class ChatEngine {
     return this.sessionSkills.get(sessionId)!;
   }
 
-  clearSession(sessionId: string): void {
+  async clearSession(sessionId: string): Promise<void> {
+    // OpenClaw trigger #3: session save on reset
+    // Flush memories through agentic extraction before clearing
+    if (this.memoryManager) {
+      try {
+        await (this.memoryManager as any).resetSession(sessionId);
+      } catch (err) {
+        console.error("[ChatEngine] Failed to flush session on reset:", err);
+      }
+    }
     this.sessions.delete(sessionId);
     this.sessionSkills.delete(sessionId);
   }

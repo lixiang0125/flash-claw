@@ -274,4 +274,14 @@ export class Mem0MemoryManager implements IMemoryManager {
   async deleteAllMemories(userId: string) { return this.mem0.deleteAll({ userId, agentId: "flash-claw" }); }
   async listMemories(userId: string, limit = 100) { return this.mem0.getAll({ userId, agentId: "flash-claw", limit }); }
   async getMemoryHistory(memoryId: string) { return this.mem0.history(memoryId); }
+
+  /**
+   * Session reset: flush working memory through agentic extraction, then clear.
+   * Called when user starts a new session or explicitly resets.
+   * (OpenClaw trigger #3: session save on /new or /reset)
+   */
+  async resetSession(sessionId: string): Promise<void> {
+    this.logger.info("Session reset triggered, flushing memories", { sessionId: sessionId.slice(0, 8) });
+    await this.workingMemory.resetSession(sessionId);
+  }
 }

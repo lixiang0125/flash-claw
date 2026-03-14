@@ -268,6 +268,51 @@ ${summary}
     return logs;
   }
 
+
+  /**
+   * Read the full content of MEMORY.md.
+   */
+  async readMemoryFile(): Promise<string> {
+    if (!this.config.workspacePath) return "";
+    const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
+    return fs.readFile(memoryPath, "utf-8").catch(() => "");
+  }
+
+  /**
+   * Append consolidated facts to MEMORY.md.
+   * Merges new content under existing sections or appends new sections.
+   */
+  async appendConsolidatedMemory(content: string): Promise<string> {
+    if (!this.config.workspacePath || !this.config.enableMemoryFile) return "";
+
+    const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
+    const existing = await fs.readFile(memoryPath, "utf-8").catch(() => "# Memory\n");
+    
+    const timestamp = new Date().toISOString().split("T")[0];
+    const separator = `\n\n<!-- Consolidated: ${timestamp} -->\n`;
+    
+    await fs.writeFile(memoryPath, existing.trimEnd() + separator + content + "\n");
+    this.logger.debug(`Consolidated memory appended to ${memoryPath}`);
+    return memoryPath;
+  }
+
+  /**
+   * Get the last consolidation date from MEMORY.md markers.
+   */
+  async getLastConsolidationDate(): Promise<string | null> {
+    if (!this.config.workspacePath) return null;
+    const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
+    const content = await fs.readFile(memoryPath, "utf-8").catch(() => "");
+    
+    // Find the last <!-- Consolidated: YYYY-MM-DD --> marker
+    const matches = content.match(/<!-- Consolidated: (\d{4}-\d{2}-\d{2}) -->/g);
+    if (!matches || matches.length === 0) return null;
+    
+    const lastMatch = matches[matches.length - 1]!;
+    const dateMatch = lastMatch.match(/(\d{4}-\d{2}-\d{2})/);
+    return dateMatch ? dateMatch[1]! : null;
+  }
+
   get workspacePath(): string {
     return this.config.workspacePath;
   }

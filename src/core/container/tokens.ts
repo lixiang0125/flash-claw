@@ -212,6 +212,7 @@ export interface IMemoryManager {
   store(entry: unknown): Promise<string>;
   recall(query: unknown): Promise<unknown[]>;
   storeInteraction(msg: unknown, response: string): Promise<void>;
+  resetSession(sessionId: string): Promise<void>;
   getUserProfile(userId: string): Promise<unknown>;
   updateUserProfile(userId: string, updates: unknown): Promise<void>;
 }
@@ -241,7 +242,7 @@ export interface IChatEngine {
   setMemoryManager(manager: unknown): void;
   setTools(tools: unknown[]): void;
   setToolExecutor(executor: unknown): void;
-  clearSession(sessionId: string): void;
+  clearSession(sessionId: string): void | Promise<void>;
 }
 
 export const CHAT_ENGINE: ServiceToken<IChatEngine> =
@@ -292,6 +293,9 @@ export interface IMarkdownMemory {
   appendDailyLog(content: string): Promise<string>;
   writeDailySummary(date: string, summary: string): Promise<string>;
   appendToMemory(content: string, section?: string): Promise<string>;
+  appendConsolidatedMemory(content: string): Promise<string>;
+  readMemoryFile(): Promise<string>;
+  getLastConsolidationDate(): Promise<string | null>;
   searchInFiles(query: string, limit?: number): Promise<unknown[]>;
   getMemoryContent(section?: string): Promise<string>;
   getDailyLogs(days?: number): Promise<string[]>;
