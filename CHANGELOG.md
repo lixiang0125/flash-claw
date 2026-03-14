@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-03-15 (10)
+
+### DI injection for FeishuBot + unified session state
+
+**Fix 1 — FeishuBot DI injection** (`src/integrations/feishu.ts`):
+- Removed hard imports of `chatEngine` from `../chat` and `taskScheduler` from `../tasks`
+- Added `setChatEngine(engine)` and `setTaskScheduler(scheduler)` DI setter methods
+- Moved WebSocket/Webhook initialization from constructor to explicit `start()` method
+- All `chatEngine.chat(...)` calls replaced with `this.chatEngineAPI!.chat(...)`
+- All `taskScheduler.setLastChatId(...)` calls replaced with `this.taskSchedulerAPI?.setLastChatId(...)`
+- Constructor no longer has side effects — safe for DI container instantiation
+
+**Fix 2 — Unified session state** (`src/chat/engine.ts`):
+- Removed `sessions: Map<string, ChatMessage[]>` — WorkingMemory is now the single source of truth
+- Removed `sessionLastAccess` map and `startSessionCleanup()` timer (WorkingMemory handles eviction)
+- Added `setWorkingMemory(wm)` DI method
+- `getHistory()` reads from `workingMemory.getMessages()` instead of local map
+- History appends go through `workingMemory.append()` instead of `history.push()`
+- `clearSession()` delegates to `workingMemory.resetSession()` (flushes before clearing)
+- Added `wmToChat()` converter: `ConversationMessage[] -> ChatMessage[]`
+
+**Supporting changes**:
+- `tokens.ts`: `IFeishuBot` interface now includes `setChatEngine`, `setTaskScheduler`, `start`, `sendMessage`, `notify`
+- `tokens.ts`: `IChatEngine` interface now includes `setWorkingMemory`, `setTaskScheduler`
+- `bootstrap.ts`: Wires `feishuBot.setChatEngine(ce)`, `feishuBot.setTaskScheduler(ts)`, `feishuBot.start()`
+- `bootstrap.ts`: Wires `chatEngine.setWorkingMemory(workingMemory)` in CHAT_ENGINE factory
+- `bootstrap.ts`: Notifier fixed to use `fb.notify(lastChatId, ...)` with proper chatId lookup
+
 ## 2026-03-15 (9)
 
 ### Code review: bug fixes and architectural improvements

@@ -240,6 +240,8 @@ export const PROMPT_BUILDER: ServiceToken<IPromptBuilder> =
 export interface IChatEngine {
   chat(request: unknown): Promise<unknown>;
   setMemoryManager(manager: unknown): void;
+  setWorkingMemory(wm: unknown): void;
+  setTaskScheduler(api: unknown): void;
   setTools(tools: unknown[]): void;
   setToolExecutor(executor: unknown): void;
   clearSession(sessionId: string): void | Promise<void>;
@@ -252,6 +254,11 @@ export interface IFeishuBot {
   handleEvent(body: unknown): Promise<unknown>;
   isConfigured(): boolean;
   getConfig(): unknown;
+  setChatEngine(engine: unknown): void;
+  setTaskScheduler(scheduler: unknown): void;
+  start(): void;
+  sendMessage(chatId: string, userId?: unknown, text?: string): Promise<void>;
+  notify(chatId: string, text: string): Promise<void>;
 }
 
 export const FEISHU_BOT: ServiceToken<IFeishuBot> =

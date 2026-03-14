@@ -491,6 +491,10 @@ export function createContainer(): Container {
       });
       chatEngine.setMemoryManager(memoryManager as any);
 
+      // Wire WorkingMemory as single source of truth for session history
+      const workingMemory = resolver.resolve(WORKING_MEMORY);
+      chatEngine.setWorkingMemory(workingMemory as any);
+
       // Wire task scheduler API so engine can create tasks from parsed messages
       chatEngine.setTaskScheduler(taskScheduler as any);
 
@@ -500,7 +504,7 @@ export function createContainer(): Container {
     },
   });
 
-  // FeishuBot
+  // FeishuBot — DI wiring deferred to bootstrap() after all services resolve
   container.register({
     token: FEISHU_BOT,
     lifecycle: Lifecycle.Singleton,
@@ -584,8 +588,13 @@ export async function bootstrap(): Promise<Container> {
     ts.setNotifier(async (taskName: string, result: string) => {
       if (fb.isConfigured()) {
         try {
+          const lastChatId = ts.getLastChatId?.() || "";
+          if (!lastChatId) {
+            tsLogger.warn("[TaskScheduler] No lastChatId, skipping notification");
+            return;
+          }
           const summary = result.length > 500 ? result.slice(0, 500) + "..." : result;
-          await fb.sendMessage?.(`✅ 任务「${taskName}」执行完成:\n${summary}`);
+          await fb.notify(lastChatId, `✅ 任务「${taskName}」执行完成:\n${summary}`);
         } catch (e) {
           tsLogger.error("[TaskScheduler] Notification send failed", { err: e });
         }
@@ -594,6 +603,12 @@ export async function bootstrap(): Promise<Container> {
 
     ts.start();
     tsLogger.info("TaskScheduler wired and started");
+
+    // Wire FeishuBot DI: inject chatEngine + taskScheduler, then start
+    fb.setChatEngine(ce);
+    fb.setTaskScheduler(ts);
+    fb.start();
+    tsLogger.info("FeishuBot DI wired and started");
   } catch (err) {
     const logger = container.resolve(LOGGER);
     logger.error("TaskScheduler wiring failed (non-fatal)", { err });
