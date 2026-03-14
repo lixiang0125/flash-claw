@@ -60,6 +60,7 @@ function getModel(): string {
 // LRU cache — avoids duplicate LLM calls for the same message
 // ---------------------------------------------------------------------------
 
+/** LRU 缓存 —— 避免对相同消息重复调用 LLM，支持 TTL 过期淘汰 */
 class LRUCache<V> {
   private map = new Map<string, { value: V; ts: number }>();
 
@@ -162,12 +163,7 @@ Rules:
 // parseTaskWithLLM
 // ---------------------------------------------------------------------------
 
-/**
- * Use an LLM to parse a user message for task-scheduling intent.
- *
- * Returns a ParsedTask if the message is a scheduling request, null otherwise.
- * On any error (network, parse, timeout) returns null silently.
- */
+/** 使用 LLM 解析用户消息中的任务调度意图，支持任意语言。缓存命中时直接返回。 */
 export async function parseTaskWithLLM(
   message: string,
 ): Promise<ParsedTask | null> {
@@ -242,13 +238,7 @@ export async function parseTaskWithLLM(
 // rewriteMemoryQuery
 // ---------------------------------------------------------------------------
 
-/**
- * Use an LLM to rewrite a user message into optimal memory-search keywords.
- *
- * Replaces the hardcoded Chinese regex patterns in buildMemorySearchText().
- * Returns a space-separated keyword string suitable for vector search.
- * On any failure, returns the original message as a safe fallback.
- */
+/** 使用 LLM 将用户消息改写为适合记忆检索的关键词，替代硬编码的中文正则匹配。 */
 export async function rewriteMemoryQuery(
   message: string,
 ): Promise<string> {

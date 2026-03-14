@@ -38,6 +38,7 @@ function wmToChat(msgs: ConversationMessage[]): ChatMessage[] {
   }));
 }
 
+/** 聊天引擎 —— 核心对话处理模块，负责 LLM 交互、工具调用、记忆检索与任务调度。 */
 class ChatEngine {
   private client: OpenAI;
   private sessionSkills: Map<string, Skill[]> = new Map();
@@ -78,6 +79,7 @@ class ChatEngine {
     console.log("[ChatEngine] TaskScheduler attached");
   }
 
+  /** 注入 WorkingMemory 作为会话历史的唯一数据源 */
   setWorkingMemory(wm: WorkingMemory): void {
     this.workingMemory = wm;
     console.log("[ChatEngine] WorkingMemory attached (single source of truth)");
@@ -92,6 +94,7 @@ class ChatEngine {
     this.toolExecutor = executor;
   }
 
+  /** 处理一次完整的对话请求：构建上下文 → LLM 推理 → 工具循环 → 持久化记忆 */
   async chat(request: ChatRequest): Promise<ChatResponse> {
     const { message, sessionId = "default", userId = "default" } = request;
     const history = this.getHistory(sessionId);
@@ -115,7 +118,7 @@ class ChatEngine {
         });
         console.log("[DEBUG] memories found:", memResults.length, (memResults as any[]).map((m: any) => m.entry.content));
         if (memResults.length > 0) {
-          relevantMemories = "\n\n## \u76f8\u5173\u8bb0\u5fc6\n" +
+          relevantMemories = "\n\n## 相关记忆\n" +
             (memResults as any[]).map((m: any) => `- ${m.entry.content}`).join("\n");
         }
       }
@@ -132,7 +135,8 @@ class ChatEngine {
       if (taskResult) {
         messages.push({
           role: "system",
-          content: `[System] \u7528\u6237\u7684\u6d88\u606f\u5df2\u88ab\u8bc6\u522b\u4e3a\u4efb\u52a1\u8c03\u5ea6\u8bf7\u6c42\uff0c\u5df2\u81ea\u52a8\u521b\u5efa: ${taskResult}\n\u8bf7\u5728\u56de\u590d\u4e2d\u786e\u8ba4\u4efb\u52a1\u521b\u5efa\u6210\u529f\uff0c\u5e76\u544a\u77e5\u7528\u6237\u4efb\u52a1\u8be6\u60c5\u3002`,
+          content: `[System] 用户的消息已被识别为任务调度请求，已自动创建: ${taskResult}
+请在回复中确认任务创建成功，并告知用户任务详情。`,
         });
       }
 
@@ -214,6 +218,31 @@ class ChatEngine {
       // Also persist to long-term memory via MemoryManager
       this.saveContext(sessionId, userId, message, lastResponse);
 
+      // 自动压缩：当消息数超过压缩阈值时，触发 WorkingMemory 压缩
+      if (this.workingMemory) {
+        const stats = this.workingMemory.getStats(sessionId);
+        const config = this.workingMemory.getConfig();
+        if (config.enableCompression && stats.messageCount >= config.compressionThreshold) {
+          this.workingMemory.compress(sessionId, async (msgs) => {
+            const texts = msgs.map(m => `${m.role}: ${m.content.slice(0, 200)}`).join("\n");
+            try {
+              const res = await this.client.chat.completions.create({
+                model: process.env.MODEL || "qwen-plus",
+                messages: [
+                  { role: "system", content: "请用简洁的中文总结以下对话历史的要点，保留关键信息。输出纯文本，不超过 500 字。" },
+                  { role: "user", content: texts },
+                ],
+                temperature: 0.3,
+                max_tokens: 600,
+              });
+              return res.choices[0]?.message?.content?.trim() || texts;
+            } catch {
+              return texts;
+            }
+          }).catch(err => console.error("[ChatEngine] 自动压缩失败:", err));
+        }
+      }
+
       return {
         response: lastResponse,
         sessionId,
@@ -227,6 +256,7 @@ class ChatEngine {
     }
   }
 
+  /** 追加消息到 WorkingMemory（单一数据源） */
   private appendToWorkingMemory(sessionId: string, role: "user" | "assistant" | "system" | "tool", content: string): void {
     if (!this.workingMemory) return;
     this.workingMemory.append(sessionId, {
@@ -236,6 +266,7 @@ class ChatEngine {
     });
   }
 
+  /** 将对话写入长期记忆（MemoryManager），用于跨会话召回 */
   private saveContext(sessionId: string, userId: string, message: string, _response: string) {
     if (this.memoryManager) {
       this.memoryManager.storeInteraction(
@@ -260,17 +291,17 @@ class ChatEngine {
     }
 
     const toolDescriptions = [
-      "## \u53ef\u7528\u5de5\u5177 (\u8bf7\u4f7f\u7528 Tool Calling \u65b9\u5f0f\u8c03\u7528)",
+      "## 可用工具 (请使用 Tool Calling 方式调用)",
       "",
-      "- web_search(query: string): \u641c\u7d22\u4e92\u8054\u7f51\u5e76\u83b7\u53d6\u7ed3\u679c",
-      "- read_file(path: string): \u8bfb\u53d6\u6587\u4ef6",
-      "- write_file(path: string, content: string): \u5199\u5165\u6587\u4ef6",
-      "- edit_file(path: string, oldString: string, newString: string): \u7f16\u8f91\u6587\u4ef6",
-      "- bash(command: string): \u6267\u884c\u547d\u4ee4",
-      "- glob(pattern: string): \u641c\u7d22\u6587\u4ef6",
-      "- grep(query: string, path?: string): \u641c\u7d22\u5185\u5bb9",
+      "- web_search(query: string): 搜索互联网并获取结果",
+      "- read_file(path: string): 读取文件",
+      "- write_file(path: string, content: string): 写入文件",
+      "- edit_file(path: string, oldString: string, newString: string): 编辑文件",
+      "- bash(command: string): 执行命令",
+      "- glob(pattern: string): 搜索文件",
+      "- grep(query: string, path?: string): 搜索内容",
       "",
-      "\u91cd\u8981\uff1a\u4e0d\u8981\u8be2\u95ee\u7528\u6237\uff0c\u81ea\u5df1\u51b3\u5b9a\u5e76\u8c03\u7528\u5de5\u5177\u3002",
+      "重要：不要询问用户，自己决定并调用工具。",
     ].join("\n");
 
     prompt += `\n\n${toolDescriptions}`;
@@ -283,13 +314,14 @@ class ChatEngine {
    * Handles both one-time (executeAfter) and recurring (cron) tasks.
    * Returns a human-readable summary string if a task was created, null otherwise.
    */
+  /** 解析用户消息中的任务调度意图，支持一次性延时任务和周期性 cron 任务 */
   private async parseAndScheduleTask(message: string, _sessionId: string): Promise<string | null> {
     if (!this.taskSchedulerAPI) {
       return null; // TaskScheduler not wired yet
     }
 
     // Quick pre-filter: skip LLM call for messages that clearly aren't tasks
-    const TASK_HINT = /\u63d0\u9192|\u5b9a\u65f6|\u95f9\u949f|\u8bb0\u5f97|\u522b\u5fd8|remind|timer|alarm|schedule|\u6bcf\u5929|\u6bcf\u5468|\u6bcf\u6708|every|after|later|\u5206\u949f\u540e|\u5c0f\u65f6\u540e|\u5929\u540e|cron|\u30ea\u30de\u30a4\u30f3\u30c9|\uc54c\ub9bc/i;
+    const TASK_HINT = /提醒|定时|闹钟|记得|别忘|remind|timer|alarm|schedule|每天|每周|每月|every|after|later|分钟后|小时后|天后|cron|リマインド|알림/i;
     if (!TASK_HINT.test(message)) return null;
 
     const task = await parseTaskWithLLM(message);
@@ -304,7 +336,7 @@ class ChatEngine {
           executeAfter: task.executeAfter,
         });
         const minutes = Math.round(task.executeAfter / 60000);
-        return `\u5b9a\u65f6\u4efb\u52a1\u300c${task.name}\u300d- ${minutes}\u5206\u949f\u540e\u6267\u884c`;
+        return `定时任务「${task.name}」- ${minutes}分钟后执行`;
       } else if (task.type === "recurring" && task.schedule) {
         // Recurring cron task
         this.taskSchedulerAPI.createTask({
@@ -314,7 +346,7 @@ class ChatEngine {
           enabled: true,
         });
         const humanSchedule = cronToHumanReadable(task.schedule);
-        return `\u5b9a\u65f6\u4efb\u52a1\u300c${task.name}\u300d- ${humanSchedule}`;
+        return `定时任务「${task.name}」- ${humanSchedule}`;
       }
     } catch (error: any) {
       console.error("[ChatEngine] Task creation failed:", error.message);
@@ -324,11 +356,7 @@ class ChatEngine {
     return null;
   }
 
-  /**
-   * Get prompt history for a session.
-   * Reads from WorkingMemory (single source of truth) if available,
-   * otherwise returns empty array (cold start).
-   */
+  /** 从 WorkingMemory 获取会话历史（单一数据源），不再使用本地 Map */
   private getHistory(sessionId: string): ChatMessage[] {
     if (this.workingMemory) {
       return wmToChat(this.workingMemory.getMessages(sessionId));

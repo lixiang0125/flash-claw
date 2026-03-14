@@ -495,7 +495,7 @@ export function createContainer(): Container {
       const workingMemory = resolver.resolve(WORKING_MEMORY);
       chatEngine.setWorkingMemory(workingMemory as any);
 
-      // Wire task scheduler API so engine can create tasks from parsed messages
+      // 注入任务调度器 API，使 ChatEngine 能从用户消息中创建定时任务
       chatEngine.setTaskScheduler(taskScheduler as any);
 
       logger.info("ChatEngine initialized with tools", { toolCount: qwenTools.length });
@@ -579,12 +579,14 @@ export async function bootstrap(): Promise<Container> {
     const fb = container.resolve(FEISHU_BOT) as any;
     const tsLogger = container.resolve(LOGGER);
 
+    // 注入任务执行器：每个任务通过 ChatEngine 处理并返回结果
     ts.setExecutor(async (taskMessage: string, taskId: string) => {
       tsLogger.info(`[TaskScheduler] Executing task ${taskId}`);
       const result = await ce.chat({ message: taskMessage, sessionId: `task_${taskId}` });
       return (result as any).response || String(result);
     });
 
+    // 注入通知器：任务执行完成后通过飞书发送结果
     ts.setNotifier(async (taskName: string, result: string) => {
       if (fb.isConfigured()) {
         try {
@@ -604,7 +606,7 @@ export async function bootstrap(): Promise<Container> {
     ts.start();
     tsLogger.info("TaskScheduler wired and started");
 
-    // Wire FeishuBot DI: inject chatEngine + taskScheduler, then start
+    // 注入飞书机器人的依赖：ChatEngine + TaskScheduler，然后启动
     fb.setChatEngine(ce);
     fb.setTaskScheduler(ts);
     fb.start();

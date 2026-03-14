@@ -90,6 +90,7 @@ function generateId(prefix: string): string {
 // TaskScheduler — JSON-file backed, OpenClaw architecture
 // ---------------------------------------------------------------------------
 
+/** 任务调度器 —— 基于 JSON 文件的定时任务管理，支持 cron、固定间隔、一次性延时三种调度模式。 */
 export class TaskScheduler {
   private filePath: string;
   private data: JobsFile;
@@ -141,6 +142,7 @@ export class TaskScheduler {
     return { version: 1, jobs: [] };
   }
 
+  /** 原子写入：先写临时文件再 rename，防止写入中断导致数据损坏 */
   private writeFile(): void {
     const dir = path.dirname(this.filePath);
     if (!fs.existsSync(dir)) {
@@ -229,6 +231,7 @@ export class TaskScheduler {
 
   // ---- CRUD ----------------------------------------------------------------
 
+  /** 创建周期性任务（cron 或 every 模式），校验 cron 表达式后持久化并注册定时器 */
   createTask(
     task: Omit<Task, "id" | "createdAt" | "lastRun" | "nextRun">,
   ): Task {
@@ -276,6 +279,7 @@ export class TaskScheduler {
     return this.jobToTask(job);
   }
 
+  /** 创建一次性延时任务（at 模式），执行完成后自动禁用 */
   createOneTimeTask(task: {
     name: string;
     message: string;
@@ -381,6 +385,7 @@ export class TaskScheduler {
 
   // ---- Execution -----------------------------------------------------------
 
+  /** 执行指定任务：记录运行状态、调用 executor、更新统计、发送通知 */
   async runTask(id: string): Promise<TaskRun> {
     const job = this.findJob(id);
     if (!job) throw new Error("Task not found");
@@ -558,6 +563,7 @@ export class TaskScheduler {
 
   // ---- Lifecycle -----------------------------------------------------------
 
+  /** 启动调度器：加载任务文件、恢复定时器、补执行漏跑的一次性任务 */
   start(): void {
     if (this.isRunning) return;
     this.isRunning = true;

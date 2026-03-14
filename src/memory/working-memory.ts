@@ -28,6 +28,7 @@ const DEFAULT_WORKING_MEMORY_CONFIG: WorkingMemoryConfig = {
 
 export type FlushCallback = (sessionId: string, recentMessages: ConversationMessage[]) => Promise<void>;
 
+/** 工作记忆 —— 管理会话级的短期消息缓冲。支持自动裁剪、token 预算、压缩和刷写到长期记忆。 */
 export class WorkingMemory {
   private sessions = new Map<string, ConversationMessage[]>();
   private config: WorkingMemoryConfig;
@@ -43,6 +44,7 @@ export class WorkingMemory {
     this.flushCallback = callback;
   }
 
+  /** 判断是否应触发刷写：token 用量超过阈值且本轮压缩周期内尚未刷写 */
   shouldFlush(sessionId: string, totalTokens: number): boolean {
     if (!this.config.memoryFlushEnabled) return false;
     if (!this.flushCallback) return false;
@@ -67,6 +69,7 @@ export class WorkingMemory {
     this.hasFlushedInCompaction.set(sessionId, false);
   }
 
+  /** 尝试将最近消息刷写到长期记忆（在 token 接近上限时自动触发） */
   async tryFlush(sessionId: string): Promise<boolean> {
     if (!this.flushCallback) return false;
 
@@ -83,6 +86,7 @@ export class WorkingMemory {
     return false;
   }
 
+  /** 追加一条消息到指定会话，自动裁剪超限消息（按条数和 token 数） */
   append(sessionId: string, message: ConversationMessage): void {
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, []);
@@ -124,10 +128,7 @@ export class WorkingMemory {
     this.sessions.delete(sessionId);
   }
 
-  /**
-   * Reset a session: flush all remaining messages through the memory extraction
-   * pipeline before clearing. This is OpenClaw's "session save on reset" trigger.
-   */
+  /** 重置会话：先将所有消息刷写到长期记忆，再清空缓冲 */
   async resetSession(sessionId: string): Promise<void> {
     if (this.flushCallback) {
       const messages = this.getMessages(sessionId);
@@ -151,6 +152,7 @@ export class WorkingMemory {
     this.hasFlushedInCompaction.clear();
   }
 
+  /** 压缩会话历史：将旧消息摘要化，保留最近 10 条和系统消息 */
   async compress(
     sessionId: string,
     summarizer: (messages: ConversationMessage[]) => Promise<string>,
@@ -194,6 +196,7 @@ export class WorkingMemory {
     return { ...this.config };
   }
 
+  /** 粗略估算消息列表的 token 数（中文按 1.5 字/token，其他按 4 字符/token） */
   private estimateTokens(messages: ConversationMessage[]): number {
     return messages.reduce((sum, m) => {
       const text = m.content;

@@ -1,5 +1,36 @@
 # Changelog
 
+## 2025-03-15 (11)
+
+### 三项优化 + Unicode 修复 + 中文注释补充
+
+**优化 1 — WorkingMemory 自动压缩** (`src/chat/engine.ts`):
+- `chat()` 方法末尾新增自动压缩触发逻辑
+- 当 `stats.messageCount >= config.compressionThreshold` 时调用 `workingMemory.compress()`
+- 压缩使用 LLM 生成中文摘要（≤500 字），异步执行不阻塞主流程
+
+**优化 2 — FeishuBot 单元测试** (`tests/feishu.test.ts`):
+- 新增 8 个测试用例，覆盖 DI 注入、事件处理、配置检查等
+- 使用 bun:test + mock 模拟 ChatEngine / TaskScheduler
+
+**优化 3 — parsers.ts 死代码清理** (`src/chat/parsers.ts`):
+- 移除已废弃的 `parseTaskFromMessage`、`matchSkillByMessage`、`parseToolCalls`
+- 仅保留仍在使用的 `cronToHumanReadable`
+- 同步更新 `src/chat/index.ts` barrel exports
+
+**Unicode 修复** (`src/integrations/feishu.ts`, `src/chat/engine.ts`):
+- 修复所有 `\uXXXX` 转义序列，还原为实际中文字符
+- 修复 engine.ts 中 relevantMemories 的多行字符串字面量语法错误
+
+**中文注释补充** (7 个文件):
+- `engine.ts`: 类定义、chat()、parseAndScheduleTask()、getHistory() 等 7 处
+- `feishu.ts`: 类定义、setChatEngine()、handleEvent()、start() 等
+- `working-memory.ts`: 类定义、append()、compress()、resetSession() 等 7 处
+- `tasks/index.ts`: 类定义、start()、runTask()、createTask() 等 6 处
+- `llm-parser.ts`: LRUCache、parseTaskWithLLM()、rewriteMemoryQuery() 3 处
+- `bootstrap.ts`: DI 注入点 4 处注释
+
+
 ## 2026-03-15 (10)
 
 ### DI injection for FeishuBot + unified session state

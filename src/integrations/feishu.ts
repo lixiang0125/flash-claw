@@ -171,7 +171,7 @@ export class FeishuBot {
     );
 
     // Add emoji reaction (no LLM required)
-    await this.addReaction(messageId, "face:\u6536\u5230");
+    await this.addReaction(messageId, "face:收到");
 
     // Background processing
     console.log("Feishu: Setting up background task");
@@ -179,7 +179,7 @@ export class FeishuBot {
       console.log("Feishu: Background task started");
       try {
         if (!this.chatEngineAPI) {
-          console.error("Feishu: ChatEngine not wired \u2014 cannot process message");
+          console.error("Feishu: ChatEngine 未注入，无法处理消息");
           return;
         }
         console.log("Feishu: Calling chatEngine");
@@ -202,16 +202,20 @@ export class FeishuBot {
 
   private async generateErrorResponse(userMessage: string, error: any): Promise<string> {
     if (!this.chatEngineAPI) {
-      return "\u62b1\u6b49\uff0c\u6211\u9047\u5230\u4e86\u4e00\u4e9b\u95ee\u9898\u3002\u8bf7\u7a0d\u540e\u91cd\u8bd5\uff0c\u6216\u8005\u6362\u4e00\u79cd\u65b9\u5f0f\u63d0\u95ee\u3002";
+      return "抱歉，我遇到了一些问题。请稍后重试，或者换一种方式提问。";
     }
     try {
       const result = await this.chatEngineAPI.chat({
-        message: `\u7528\u6237\u8bf4: "${userMessage}"\n\n\u5904\u7406\u7528\u6237\u8bf7\u6c42\u65f6\u53d1\u751f\u9519\u8bef: ${error.message || error}\n\n\u8bf7\u751f\u6210\u4e00\u4e2a\u53cb\u597d\u7684\u56de\u590d\uff0c\u544a\u77e5\u7528\u6237\u9047\u5230\u4e86\u95ee\u9898\uff0c\u4f46\u4e0d\u8981\u63d0\u5230\u6280\u672f\u7ec6\u8282\u3002\u53ef\u4ee5\u5efa\u8bae\u7528\u6237\u7a0d\u540e\u91cd\u8bd5\u6216\u6362\u4e00\u79cd\u65b9\u5f0f\u63d0\u95ee\u3002`,
+        message: `用户说: "${userMessage}"
+
+处理用户请求时发生错误: ${error.message || error}
+
+请生成一个友好的回复，告知用户遇到了问题，但不要提到技术细节。可以建议用户稍后重试或换一种方式提问。`,
         sessionId: "feishu_error_response",
       });
       return result.response;
     } catch {
-      return "\u62b1\u6b49\uff0c\u6211\u9047\u5230\u4e86\u4e00\u4e9b\u95ee\u9898\u3002\u8bf7\u7a0d\u540e\u91cd\u8bd5\uff0c\u6216\u8005\u6362\u4e00\u79cd\u65b9\u5f0f\u63d0\u95ee\u3002";
+      return "抱歉，我遇到了一些问题。请稍后重试，或者换一种方式提问。";
     }
   }
 
@@ -317,7 +321,7 @@ export class FeishuBot {
       const data = JSON.parse(text);
 
       if (data.code !== 0) {
-        throw new Error(`\u6dfb\u52a0\u8868\u60c5\u5931\u8d25: ${data.msg}`);
+        throw new Error(`添加表情失败: ${data.msg}`);
       }
 
       console.log(`Feishu: Added ${emojiType} reaction to message ${messageId}`);
@@ -424,7 +428,7 @@ export class FeishuBot {
       );
 
       if (!this.chatEngineAPI) {
-        console.error("Feishu: ChatEngine not wired \u2014 cannot process webhook message");
+        console.error("Feishu: ChatEngine 未注入，无法处理 Webhook 消息");
         return { success: false, error: "ChatEngine not available" };
       }
 
@@ -437,7 +441,7 @@ export class FeishuBot {
         await this.sendMessage(chatId, senderId, result.response);
       } catch (error) {
         console.error("Feishu: Chat error:", error);
-        await this.sendMessage(chatId, senderId, "\u5904\u7406\u6d88\u606f\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5");
+        await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
       }
     }
 
@@ -445,7 +449,7 @@ export class FeishuBot {
   }
 
   /**
-   * \u83b7\u53d6\u98de\u4e66\u8fde\u63a5\u72b6\u6001
+   * 获取飞书连接状态
    */
   getStatus(): { connected: boolean; appId?: string } {
     return {
