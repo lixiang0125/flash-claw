@@ -1,5 +1,26 @@
 # Changelog
 
+## 2025-03-15 (15)
+
+### @types/dockerode + 测试覆盖率 Codecov + feishu.test.ts 零网络策略
+
+**1. 安装 @types/dockerode 消除 TS 编译警告:**
+- `bun add -d @types/dockerode` — 类型声明成功安装到 node_modules/@types/dockerode
+- `npx tsc --noEmit` 编译 **零错误**（之前 TS2307: Cannot find module 'dockerode'）
+- CI 中 typecheck 步骤移除 `continue-on-error`，TS 编译正式成为硬性门控
+
+**2. 测试覆盖率报告 + Codecov 集成** (`.github/workflows/ci.yml`):
+- 测试命令升级为 `bun test --run --coverage --coverage-reporter=lcov`
+- 覆盖率输出到 `coverage/lcov.info`（已验证 52KB lcov 报告生成）
+- 新增 `codecov/codecov-action@v4` 步骤，自动上传覆盖率到 Codecov
+- 需在 GitHub repo Settings > Secrets 中添加 `CODECOV_TOKEN`
+
+**3. feishu.test.ts 零网络策略** (`tests/feishu.test.ts`):
+- 所有调用 `handleEvent` 的测试用例均添加 `spyOn(bot, "sendMessage").mockResolvedValue(undefined)`
+- 新增测试 "sendMessage 被 mock 后不产生网络请求" — 验证 chatId 和回复文本正确传递
+- 测试总数: 120 pass / 1 skip / 0 fail（新增 1 个 feishu 测试用例）
+- 完全消除 feishu.test.ts 中的 HTTP 400 错误日志
+
 ## 2025-03-15 (14)
 
 ### sendMessage mock + llm-parser 测试 + CI 完善

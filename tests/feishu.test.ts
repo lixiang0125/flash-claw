@@ -1,16 +1,14 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, mock, beforeEach, spyOn } from "bun:test";
 import { FeishuBot } from "../src/integrations/feishu";
 
 describe("FeishuBot DI", () => {
   let bot: FeishuBot;
 
   beforeEach(() => {
-    // 每个测试用例创建新实例，确保隔离
     bot = new FeishuBot();
   });
 
   it("构造函数不应自动启动 WebSocket", () => {
-    // 未配置 appId/appSecret 时，getStatus 应返回未连接
     const status = bot.getStatus();
     expect(status.connected).toBe(false);
   });
@@ -19,7 +17,6 @@ describe("FeishuBot DI", () => {
     const mockEngine = {
       chat: mock(() => Promise.resolve({ response: "test reply" })),
     };
-    // 不应抛错
     bot.setChatEngine(mockEngine);
   });
 
@@ -27,11 +24,12 @@ describe("FeishuBot DI", () => {
     const mockScheduler = {
       setLastChatId: mock(() => {}),
     };
-    // 不应抛错
     bot.setTaskScheduler(mockScheduler);
   });
 
   it("handleEvent 未注入 ChatEngine 时应返回错误", async () => {
+    spyOn(bot, "sendMessage").mockResolvedValue(undefined);
+
     const result = await bot.handleEvent({
       type: "message",
       event: {
@@ -53,6 +51,8 @@ describe("FeishuBot DI", () => {
     };
     bot.setChatEngine(mockEngine);
 
+    const sendSpy = spyOn(bot, "sendMessage").mockResolvedValue(undefined);
+
     const result = await bot.handleEvent({
       type: "message",
       event: {
@@ -66,6 +66,10 @@ describe("FeishuBot DI", () => {
     });
     expect(result.success).toBe(true);
     expect(mockEngine.chat).toHaveBeenCalled();
+    expect(sendSpy).toHaveBeenCalled();
+    if (sendSpy.mock.calls.length > 0) {
+      expect(sendSpy.mock.calls[0][0]).toBe("test_chat");
+    }
   });
 
   it("handleEvent url_verification 应返回 challenge", async () => {
@@ -78,15 +82,37 @@ describe("FeishuBot DI", () => {
   });
 
   it("start() 未配置时不应抛错", () => {
-    // 环境变量未设置，start 应静默返回
     expect(() => bot.start()).not.toThrow();
   });
 
   it("isConfigured 无配置时应返回 false", () => {
-    // 清除环境变量后创建的实例
     const cleanBot = new FeishuBot();
-    // 注意：如果环境变量中有 FEISHU_APP_ID 会返回 true
-    // 此测试仅验证方法可调用
     expect(typeof cleanBot.isConfigured()).toBe("boolean");
+  });
+
+  it("sendMessage 被 mock 后不产生网络请求", async () => {
+    const mockEngine = {
+      chat: mock(() => Promise.resolve({ response: "回复内容" })),
+    };
+    bot.setChatEngine(mockEngine);
+
+    const sendSpy = spyOn(bot, "sendMessage").mockResolvedValue(undefined);
+
+    await bot.handleEvent({
+      type: "message",
+      event: {
+        message: {
+          chat_id: "chat_abc",
+          content: JSON.stringify({ text: "测试" }),
+          message_type: "text",
+          sender: { sender_id: { user_id: "u2" } },
+        },
+      },
+    });
+
+    expect(sendSpy).toHaveBeenCalled();
+    const callArgs = sendSpy.mock.calls[0];
+    expect(callArgs[0]).toBe("chat_abc");
+    expect(callArgs[2]).toBe("回复内容");
   });
 });

@@ -11,8 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # dummy key 防止 mem0 / llm-parser 因缺少 API key 而在初始化时抛错
-      OPENAI_API_KEY: ci-dummy-key-not-for-real-use
+      MEM0_API_KEY: ci-dummy-key-not-for-real-use
 
     steps:
       - uses: actions/checkout@v4
@@ -26,10 +25,17 @@ jobs:
 
       - name: TypeScript type check
         run: bun run typecheck
-        continue-on-error: true   # dockerode 类型缺失是已知问题，不阻塞 CI
 
-      - name: Run tests
-        run: bun test --run
+      - name: Run tests with coverage
+        run: bun test --run --coverage --coverage-reporter=lcov 2>&1 | tee test-output.txt
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Build
         run: bun run build:web
