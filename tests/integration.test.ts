@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, mock, beforeEach, spyOn } from "bun:test";
 
 // ============================================================================
 // 关键: mock llm-parser 模块，避免真实 HTTP 调用导致超时
@@ -20,6 +20,7 @@ import { chatEngine } from "../src/chat/engine";
 // 模拟 bootstrap 中的组装流程:
 //   WorkingMemory → ChatEngine → FeishuBot / TaskScheduler
 // 使用真实 WorkingMemory + FeishuBot, mock OpenAI client
+// sendMessage 被 spyOn 拦截，消除所有网络依赖
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,9 @@ function wireAll(replyText: string = "模拟回复") {
   const fb = new FeishuBot();
   fb.setChatEngine(chatEngine as any);
 
+  // 关键: mock sendMessage 消除真实 HTTP 请求（飞书 API 400 错误）
+  const sendMessageSpy = spyOn(fb, "sendMessage").mockResolvedValue(undefined);
+
   const mockTaskScheduler = {
     setLastChatId: mock(() => {}),
     createTask: mock(() => ({})),
@@ -88,7 +92,7 @@ function wireAll(replyText: string = "模拟回复") {
   fb.setTaskScheduler(mockTaskScheduler as any);
   chatEngine.setTaskScheduler(mockTaskScheduler as any);
 
-  return { wm, mm, mockClient, fb, mockTaskScheduler };
+  return { wm, mm, mockClient, fb, mockTaskScheduler, sendMessageSpy };
 }
 
 // ===========================================================================
@@ -115,7 +119,6 @@ describe("集成测试 — DI 链路验证", () => {
       const { wm, fb } = wireAll();
       expect(wm).toBeInstanceOf(WorkingMemory);
       expect(fb).toBeInstanceOf(FeishuBot);
-      // feishuBot 内部应持有 chatEngine 引用
       expect((fb as any).chatEngineAPI).toBeDefined();
     });
   });
@@ -135,22 +138,17 @@ describe("集成测试 — DI 链路验证", () => {
 
     it("连续 chat() 调用携带历史上下文发送给 OpenAI", async () => {
       const { wm, mockClient } = wireAll("第二次回复");
-      // 预填充一轮对话
       wm.append("int-s2", { role: "user", content: "第一轮问题", timestamp: Date.now() });
       wm.append("int-s2", { role: "assistant", content: "第一轮回答", timestamp: Date.now() });
 
       await chatEngine.chat({ message: "第二轮问题", sessionId: "int-s2" });
 
-      // 验证 OpenAI client 的 create 被调用了
       expect(mockClient.chat.completions.create).toHaveBeenCalled();
-      // 获取调用参数: bun:test mock 通过 .mock.calls 访问
       const calls = (mockClient.chat.completions.create as any).mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(1);
       const firstCallArgs = calls[0];
-      // create(params) → firstCallArgs = [params]
       const msgs = firstCallArgs[0]?.messages;
       if (msgs) {
-        // system + 历史(user, assistant) + 新 user = 至少 4 条
         expect(msgs.length).toBeGreaterThanOrEqual(4);
       }
     });
@@ -169,15 +167,26 @@ describe("集成测试 — DI 链路验证", () => {
   // =========================================================================
   describe("FeishuBot → ChatEngine 消息路由", () => {
     it("飞书消息事件通过 chatEngine 处理并返回回复", async () => {
-      const { fb, wm } = wireAll("AI回复");
+      const { fb, sendMessageSpy } = wireAll("AI回复");
       const event = createFeishuMessageEvent("你好");
       const res = await fb.handleEvent(event);
       expect(res.success).toBe(true);
+      // 验证 sendMessage 被调用（而非真实 HTTP 请求）
+      expect(sendMessageSpy).toHaveBeenCalled();
+    });
+
+    it("飞书 sendMessage 收到正确的回复文本", async () => {
+      const { fb, sendMessageSpy } = wireAll("测试回复内容");
+      await fb.handleEvent(createFeishuMessageEvent("问题", "chat_x"));
+      const callArgs = sendMessageSpy.mock.calls[0];
+      // sendMessage(chatId, userId, text)
+      expect(callArgs[0]).toBe("chat_x");
+      expect(callArgs[2]).toBe("测试回复内容");
     });
 
     it("未注入 ChatEngine 的 FeishuBot 返回错误", async () => {
       const fb = new FeishuBot();
-      // 不调用 setChatEngine
+      const sendSpy = spyOn(fb, "sendMessage").mockResolvedValue(undefined);
       const event = createFeishuMessageEvent("你好");
       const res = await fb.handleEvent(event);
       expect(res.success).toBe(false);
@@ -199,49 +208,45 @@ describe("集成测试 — DI 链路验证", () => {
   // =========================================================================
   describe("完整 E2E 模拟: 消息 → 飞书 → 引擎 → 记忆", () => {
     it("完整消息流: 飞书事件 → ChatEngine → WorkingMemory 更新", async () => {
-      const { fb, wm, mm } = wireAll("你好!我是AI助手");
+      const { fb, wm, mm, sendMessageSpy } = wireAll("你好!我是AI助手");
       const event = createFeishuMessageEvent("请介绍自己", "chat_e2e", "user_x");
       const res = await fb.handleEvent(event);
 
-      // 1. 飞书返回成功
       expect(res.success).toBe(true);
-      // 2. 长期记忆被写入 (异步，给一个 tick)
+      expect(sendMessageSpy).toHaveBeenCalled();
       await new Promise(r => setTimeout(r, 50));
       expect(mm.storeInteraction).toHaveBeenCalled();
     });
 
     it("多轮对话: 连续飞书消息构建完整历史", async () => {
-      const { fb, wm } = wireAll("第一轮AI回复");
+      const { fb, wm, sendMessageSpy } = wireAll("第一轮AI回复");
       const chatId = "chat_multi";
 
-      // 第一轮
       await fb.handleEvent(createFeishuMessageEvent("第一个问题", chatId));
-      // 切换回复
       (chatEngine as any).client = createMockOpenAIClient("第二轮AI回复");
-      // 第二轮
       const res2 = await fb.handleEvent(createFeishuMessageEvent("第二个问题", chatId));
       expect(res2.success).toBe(true);
+      // sendMessage 应被调用 2 次（每轮各一次）
+      expect(sendMessageSpy.mock.calls.length).toBe(2);
     });
 
     it("多会话隔离: 不同 chatId 互不干扰", async () => {
-      const { fb, wm } = wireAll("回复A");
+      const { fb, wm, sendMessageSpy } = wireAll("回复A");
       await fb.handleEvent(createFeishuMessageEvent("问题A", "chat_a", "user_a"));
 
       (chatEngine as any).client = createMockOpenAIClient("回复B");
       await fb.handleEvent(createFeishuMessageEvent("问题B", "chat_b", "user_b"));
 
-      // 各 chatId 的 session 使用 getSessionId(chatId, senderId) 来确定
-      // 我们无法轻松预测内部 sessionId, 但可以验证 chatEngine 没有崩溃
-      // 以及 WorkingMemory 有多个活跃 session
       expect(wm.activeSessionCount).toBeGreaterThanOrEqual(2);
+      expect(sendMessageSpy.mock.calls.length).toBe(2);
     });
 
     it("任务相关消息带关键词时 chatEngine 检测但不崩溃", async () => {
-      const { fb } = wireAll("好的，已创建提醒");
+      const { fb, sendMessageSpy } = wireAll("好的，已创建提醒");
       const event = createFeishuMessageEvent("提醒我明天下午开会", "chat_task");
       const res = await fb.handleEvent(event);
-      // 不管任务是否创建成功，主流程不应崩溃
       expect(res.success).toBe(true);
+      expect(sendMessageSpy).toHaveBeenCalled();
     });
   });
 });
