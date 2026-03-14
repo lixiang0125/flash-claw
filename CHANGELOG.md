@@ -1,5 +1,21 @@
 # Changelog
 
+## 2025-03-15 (13)
+
+### 修复 bootstrap.test.ts 运行时错误
+
+**dockerode 延迟加载** (`src/tools/sandbox/index.ts`):
+- 将 `DockerSandboxManager` 从顶层静态 import 改为 `require()` 延迟加载
+- 仅在 `useDocker: true` 时才加载 `dockerode` 依赖
+- 解决 CI / 本地开发环境未安装 dockerode 时 bootstrap 测试报错的问题
+
+**bootstrap.test.ts 环境变量注入** (`src/core/container/bootstrap.test.ts`):
+- 在 `beforeEach` 中设置 `OPENAI_API_KEY` dummy 值，避免 `createMem0Memory()` 因缺少 API key 抛错
+- 在 `afterEach` 中恢复原始环境变量，防止测试间泄漏
+
+**测试结果**: 90 pass / 1 skip / 0 fail across 8 files
+
+
 ## 2025-03-15 (12)
 
 ### 单元测试 + 集成测试全面补充

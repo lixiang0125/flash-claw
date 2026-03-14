@@ -1,9 +1,28 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+// @ts-nocheck
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { bootstrap, createContainer, CONFIG, LOGGER, EVENT_BUS, DATABASE } from "./bootstrap";
 import { Lifecycle } from "./container";
 
 describe("Bootstrap", () => {
   let container: any;
+  let originalApiKey: string | undefined;
+
+  beforeEach(() => {
+    // 保存并设置环境变量，避免 mem0 因缺少 API key 而抛错
+    originalApiKey = process.env.OPENAI_API_KEY;
+    if (!process.env.OPENAI_API_KEY) {
+      process.env.OPENAI_API_KEY = "test-dummy-key-for-bootstrap";
+    }
+  });
+
+  afterEach(() => {
+    // 恢复原始环境变量
+    if (originalApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = originalApiKey;
+    }
+  });
 
   afterAll(async () => {
     if (container) {
