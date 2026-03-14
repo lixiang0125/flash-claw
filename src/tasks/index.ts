@@ -146,7 +146,10 @@ export class TaskScheduler {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), "utf-8");
+    const content = JSON.stringify(this.data, null, 2);
+    const tmpPath = this.filePath + '.tmp';
+    fs.writeFileSync(tmpPath, content, 'utf-8');
+    fs.renameSync(tmpPath, this.filePath);
   }
 
   // ---- Schedule helpers ----------------------------------------------------
@@ -563,7 +566,6 @@ export class TaskScheduler {
     this.data = this.readFile();
 
     const tasks = this.data.jobs.filter((j) => j.enabled);
-    let needsWrite = false;
 
     for (const job of tasks) {
       const nextRun = this.calculateNextRun(job.schedule);
@@ -578,8 +580,18 @@ export class TaskScheduler {
       }
     }
 
-    if (needsWrite) {
-      this.writeFile();
+    // Recover missed one-time tasks that never executed before downtime
+    for (const job of this.data.jobs) {
+      if (job.enabled && job.schedule.kind === "at") {
+        const atTime = new Date(job.schedule.at).getTime();
+        if (atTime <= Date.now() && job.state.lastStatus !== "success") {
+          // Missed one-time task — execute now
+          console.log(`[TaskScheduler] Recovering missed one-time task: ${job.name}`);
+          this.runTask(job.id).catch(err =>
+            console.error(`[TaskScheduler] Failed to recover task ${job.id}:`, err)
+          );
+        }
+      }
     }
 
     // Safety-net poll: every 60s check for missed tasks

@@ -147,6 +147,8 @@ export class WorkingMemory {
 
   clearAll(): void {
     this.sessions.clear();
+    this.compactionCount.clear();
+    this.hasFlushedInCompaction.clear();
   }
 
   async compress(
@@ -160,7 +162,7 @@ export class WorkingMemory {
     this.incrementCompactionCount(sessionId);
 
     const systemMsgs = messages.filter((m) => m.role === "system");
-    const recentMsgs = messages.slice(-10);
+    const recentMsgs = messages.slice(-10).filter(m => m.role !== "system");
     const oldMsgs = messages.slice(systemMsgs.length, messages.length - 10);
 
     if (oldMsgs.length === 0) return;

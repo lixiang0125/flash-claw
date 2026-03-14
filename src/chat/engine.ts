@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import { listSkills, type Skill } from "../skills";
-import { userProfileStore } from "../profiles";
-import { type IMemoryManager, type UserProfile } from "../memory";
+import { type IMemoryManager } from "../memory";
 import { parseTaskWithLLM, rewriteMemoryQuery } from "./llm-parser";
 import { cronToHumanReadable } from "./parsers";
 import type { ChatRequest, ChatResponse } from "./types";
@@ -15,12 +14,6 @@ interface ChatMessage {
   tool_call_id?: string;
   toolName?: string;
   name?: string;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
 }
 
 /**
@@ -176,7 +169,13 @@ class ChatEngine {
 
         for (const tc of assistantMsg.tool_calls!) {
           const toolName = (tc as any).function.name;
-          const args = JSON.parse((tc as any).function.arguments || "{}");
+
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse((tc as any).function.arguments || "{}");
+          } catch {
+            args = {};
+          }
 
           console.log("[TOOL_CALL]", toolName, JSON.stringify(args).substring(0, 100));
 
@@ -249,11 +248,7 @@ class ChatEngine {
     const toolDescriptions = [
       "## 可用工具 (请使用 Tool Calling 方式调用)",
       "",
-      "当需要获取网页内容时，必须使用 web_fetch 工具：",
-      "- web_fetch(url: string): 获取 URL 内容并总结",
-      "",
-      "其他工具：",
-      "- web_search(query: string): 搜索互联网",
+      "- web_search(query: string): 搜索互联网并获取结果",
       "- read_file(path: string): 读取文件",
       "- write_file(path: string, content: string): 写入文件",
       "- edit_file(path: string, oldString: string, newString: string): 编辑文件",
@@ -261,7 +256,7 @@ class ChatEngine {
       "- glob(pattern: string): 搜索文件",
       "- grep(query: string, path?: string): 搜索内容",
       "",
-      "重要：用户发送 URL 时，必须调用 web_fetch 工具获取内容。不要询问用户，自己决定并调用工具。",
+      "重要：不要询问用户，自己决定并调用工具。",
     ].join("\n");
 
     prompt += `\n\n${toolDescriptions}`;
@@ -278,6 +273,10 @@ class ChatEngine {
     if (!this.taskSchedulerAPI) {
       return null; // TaskScheduler not wired yet
     }
+
+    // Quick pre-filter: skip LLM call for messages that clearly aren't tasks
+    const TASK_HINT = /提醒|定时|闹钟|记得|别忘|remind|timer|alarm|schedule|每天|每周|每月|every|after|later|分钟后|小时后|天后|cron|リマインド|알림/i;
+    if (!TASK_HINT.test(message)) return null;
 
     const task = await parseTaskWithLLM(message);
     if (!task) return null;

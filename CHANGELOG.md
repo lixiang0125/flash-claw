@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-15 (9)
+
+### Code review: bug fixes and architectural improvements
+
+Full audit of 13 core files. Fixed 10 issues across 5 files.
+
+**Critical fixes**:
+- **tasks/index.ts**: Atomic file writes (write-to-tmp + rename), missed one-time task recovery on restart, removed dead `needsWrite` code
+- **engine.ts**: Guarded `JSON.parse` on tool_call arguments (prevents chat loop crash on malformed LLM output)
+- **markdown-memory.ts**: Added async write lock (promise-chain mutex) to prevent read-modify-write race conditions
+
+**High-priority fixes**:
+- **engine.ts**: Added regex pre-filter before LLM task parsing (avoids LLM call on every message)
+- **engine.ts**: Fixed tool prompt mismatch (`web_fetch` referenced but not registered; corrected to `web_search`)
+- **engine.ts**: Removed dead imports (`userProfileStore`, `UserProfile`, `ToolCall` interface)
+
+**Medium fixes**:
+- **working-memory.ts**: `clearAll()` now clears `compactionCount` + `hasFlushedInCompaction` maps
+- **working-memory.ts**: `compress()` no longer duplicates system messages in output
+- **markdown-memory.ts**: `searchInFiles()` skips zero-match results
+- **markdown-memory.ts**: `getMemoryContent()` returns full file when section is undefined
+- **markdown-memory.ts**: Removed dead `header` variable in `appendDailyLog()`
+
 ## 2026-03-15 (8)
 
 ### LLM-based task parsing, JSON storage, memory query rewriting

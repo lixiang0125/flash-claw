@@ -22,6 +22,20 @@ export interface MemoryFileResult {
 export class MarkdownMemory {
   private config: MarkdownMemoryConfig;
   private logger: Logger;
+  private writeLock = Promise.resolve();
+
+  private async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    let release: () => void;
+    const next = new Promise<void>(r => (release = r));
+    const prev = this.writeLock;
+    this.writeLock = next;
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release!();
+    }
+  }
 
   constructor(logger: Logger, config?: Partial<MarkdownMemoryConfig>) {
     this.logger = logger;
@@ -47,16 +61,17 @@ export class MarkdownMemory {
       return "";
     }
 
-    const today = new Date().toISOString().split("T")[0];
-    const logPath = path.join(this.config.workspacePath, "memory", `${today}.md`);
+    return this.withLock(async () => {
+      const today = new Date().toISOString().split("T")[0];
+      const logPath = path.join(this.config.workspacePath, "memory", `${today}.md`);
 
-    const header = `# ${today}\n\n`;
-    const existing = await fs.readFile(logPath, "utf-8").catch(() => "");
+      const existing = await fs.readFile(logPath, "utf-8").catch(() => "");
 
-    await fs.writeFile(logPath, existing + content + "\n");
-    this.logger.debug(`Appended to daily log: ${logPath}`);
+      await fs.writeFile(logPath, existing + content + "\n");
+      this.logger.debug(`Appended to daily log: ${logPath}`);
 
-    return logPath;
+      return logPath;
+    });
   }
 
   async appendToMemory(content: string, section?: string): Promise<string> {
@@ -64,39 +79,41 @@ export class MarkdownMemory {
       return "";
     }
 
-    const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
+    return this.withLock(async () => {
+      const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
 
-    if (!section) {
-      const existing = await fs.readFile(memoryPath, "utf-8").catch(() => "");
-      await fs.writeFile(memoryPath, existing + content + "\n");
-      return memoryPath;
-    }
-
-    const content_1 = await fs.readFile(memoryPath, "utf-8").catch(() => "");
-    const lines = content_1.split("\n");
-    let sectionStart = -1;
-    let sectionEnd = -1;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = (lines[i] ?? "").trim();
-      if (line === `## ${section}`) {
-        sectionStart = i;
-      } else if (sectionStart >= 0 && line.startsWith("## ")) {
-        sectionEnd = i;
-        break;
+      if (!section) {
+        const existing = await fs.readFile(memoryPath, "utf-8").catch(() => "");
+        await fs.writeFile(memoryPath, existing + content + "\n");
+        return memoryPath;
       }
-    }
 
-    if (sectionStart < 0) {
-      await fs.writeFile(memoryPath, content_1 + `\n## ${section}\n${content}\n`);
-    } else {
-      const endIdx = sectionEnd > 0 ? sectionEnd : lines.length;
-      lines.splice(endIdx, 0, content);
-      await fs.writeFile(memoryPath, lines.join("\n"));
-    }
+      const content_1 = await fs.readFile(memoryPath, "utf-8").catch(() => "");
+      const lines = content_1.split("\n");
+      let sectionStart = -1;
+      let sectionEnd = -1;
 
-    this.logger.debug(`Appended to memory section: ${section}`);
-    return memoryPath;
+      for (let i = 0; i < lines.length; i++) {
+        const line = (lines[i] ?? "").trim();
+        if (line === `## ${section}`) {
+          sectionStart = i;
+        } else if (sectionStart >= 0 && line.startsWith("## ")) {
+          sectionEnd = i;
+          break;
+        }
+      }
+
+      if (sectionStart < 0) {
+        await fs.writeFile(memoryPath, content_1 + `\n## ${section}\n${content}\n`);
+      } else {
+        const endIdx = sectionEnd > 0 ? sectionEnd : lines.length;
+        lines.splice(endIdx, 0, content);
+        await fs.writeFile(memoryPath, lines.join("\n"));
+      }
+
+      this.logger.debug(`Appended to memory section: ${section}`);
+      return memoryPath;
+    });
   }
 
 
@@ -110,16 +127,18 @@ export class MarkdownMemory {
       return "";
     }
 
-    const logPath = path.join(this.config.workspacePath, "memory", `${date}.md`);
-    const content = `# ${date} Daily Summary
+    return this.withLock(async () => {
+      const logPath = path.join(this.config.workspacePath, "memory", `${date}.md`);
+      const content = `# ${date} Daily Summary
 
 ${summary}
 `;
 
-    await fs.writeFile(logPath, content);
-    this.logger.debug(`Daily summary written: ${logPath}`);
+      await fs.writeFile(logPath, content);
+      this.logger.debug(`Daily summary written: ${logPath}`);
 
-    return logPath;
+      return logPath;
+    });
   }
 
   async searchInFiles(query: string, limit = 10): Promise<MemoryFileResult[]> {
@@ -167,6 +186,8 @@ ${summary}
           });
         }
 
+        if (matches.length === 0) continue;
+
         results.push({
           path: filePath,
           lines: matches.slice(0, 3),
@@ -207,10 +228,12 @@ ${summary}
           });
         }
 
-        results.push({
-          path: memoryFile,
-          lines: matches.slice(0, 3),
-        });
+        if (matches.length > 0) {
+          results.push({
+            path: memoryFile,
+            lines: matches.slice(0, 3),
+          });
+        }
       } catch {
         // MEMORY.md may not exist
       }
@@ -226,6 +249,9 @@ ${summary}
 
     const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
     const content = await fs.readFile(memoryPath, "utf-8").catch(() => "");
+
+    if (!section) return content;
+
     const lines = content.split("\n");
     let sectionStart = -1;
     let sectionEnd = -1;
@@ -285,15 +311,17 @@ ${summary}
   async appendConsolidatedMemory(content: string): Promise<string> {
     if (!this.config.workspacePath || !this.config.enableMemoryFile) return "";
 
-    const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
-    const existing = await fs.readFile(memoryPath, "utf-8").catch(() => "# Memory\n");
-    
-    const timestamp = new Date().toISOString().split("T")[0];
-    const separator = `\n\n<!-- Consolidated: ${timestamp} -->\n`;
-    
-    await fs.writeFile(memoryPath, existing.trimEnd() + separator + content + "\n");
-    this.logger.debug(`Consolidated memory appended to ${memoryPath}`);
-    return memoryPath;
+    return this.withLock(async () => {
+      const memoryPath = path.join(this.config.workspacePath, "MEMORY.md");
+      const existing = await fs.readFile(memoryPath, "utf-8").catch(() => "# Memory\n");
+      
+      const timestamp = new Date().toISOString().split("T")[0];
+      const separator = `\n\n<!-- Consolidated: ${timestamp} -->\n`;
+      
+      await fs.writeFile(memoryPath, existing.trimEnd() + separator + content + "\n");
+      this.logger.debug(`Consolidated memory appended to ${memoryPath}`);
+      return memoryPath;
+    });
   }
 
   /**
