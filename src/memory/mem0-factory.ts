@@ -21,10 +21,11 @@ function resolveLocalDims(
 }
 
 export interface Mem0FactoryOptions {
-  /** LLM API key (DashScope / OpenAI-compatible) */
+  /** LLM API key — defaults to OPENAI_API_KEY (coding endpoint key) */
   apiKey: string;
-  /** LLM base URL */
+  /** LLM base URL — defaults to OPENAI_BASE_URL (coding endpoint) */
   baseURL: string;
+  /** LLM model — defaults to MODEL env var (same model as main chat) */
   llmModel: string;
 
   /**
@@ -55,11 +56,16 @@ const localModel =
 
 const DEFAULT_OPTIONS: Mem0FactoryOptions = {
   // ── LLM ────────────────────────────────────────────────────────────────
+  // 复用主 LLM 配置：coding 端点 + 相同模型，无需额外 API key
   apiKey: process.env.OPENAI_API_KEY || "",
   baseURL:
     process.env.MEM0_BASE_URL ||
-    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  llmModel: process.env.MEM0_LLM_MODEL || "qwen-plus",
+    process.env.OPENAI_BASE_URL ||
+    "https://coding.dashscope.aliyuncs.com/v1",
+  llmModel:
+    process.env.MEM0_LLM_MODEL ||
+    process.env.MODEL ||
+    "qwen3.5-plus",
 
   // ── Embedding mode ─────────────────────────────────────────────────────
   embeddingMode:
@@ -86,8 +92,14 @@ const DEFAULT_OPTIONS: Mem0FactoryOptions = {
  * Create a mem0 Memory instance configured for local OSS mode.
  *
  * Architecture:
- *   - **LLM**       -> DashScope (Qwen) via OPENAI_API_KEY + MEM0_BASE_URL
+ *   - **LLM**       -> Coding DashScope endpoint, same key/model as main chat
  *   - **Embedding** -> Local @xenova/transformers (default) or remote API
+ *
+ * LLM configuration:
+ *   - Uses OPENAI_API_KEY + OPENAI_BASE_URL (coding endpoint) by default
+ *   - Model defaults to MODEL env var (e.g. qwen3.5-plus)
+ *   - Can be overridden via MEM0_BASE_URL / MEM0_LLM_MODEL if needed
+ *   - This eliminates the need for a separate general DashScope API key
  *
  * When `embeddingMode === "local"` (default):
  *   - Uses `Xenova/multilingual-e5-small` (384d, ~100 MB ONNX, <0.5B params)
@@ -128,7 +140,7 @@ export function createMem0Memory(
     : opts.embeddingDims;
 
   logger.info(
-    `Initializing mem0 Memory (embedding: ${isLocal ? "local " + opts.localEmbeddingModel : "remote " + opts.embeddingModel})`,
+    `Initializing mem0 Memory (LLM: ${opts.llmModel} @ ${opts.baseURL}, embedding: ${isLocal ? "local " + opts.localEmbeddingModel : "remote " + opts.embeddingModel})`,
     {
       llmModel: opts.llmModel,
       llmBaseURL: opts.baseURL,

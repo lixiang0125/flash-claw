@@ -48,8 +48,7 @@ OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
 MODEL=qwen3.5-plus
 
-# mem0 记忆系统
-MEM0_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+# mem0 记忆系统（LLM 复用上方主配置，无需额外 key）
 # Embedding 默认使用本地模型，无需额外 API key
 MEM0_EMBEDDING_MODE=local
 ```

@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-03-14 (3)
+
+### mem0 LLM 切换为 coding 端点
+
+**核心变更**: mem0 的 LLM 服务从通用 DashScope 端点切换为 coding 端点，复用主 LLM
+的 `OPENAI_API_KEY` + `OPENAI_BASE_URL` + `MODEL`，无需额外配置单独的 API key。
+
+**问题**: 之前 mem0 的 LLM 指向 `dashscope.aliyuncs.com/compatible-mode/v1`（通用端点），
+但项目的 `OPENAI_API_KEY` 是 coding 专用 key（`sk-sp-*`），只能用于
+`coding.dashscope.aliyuncs.com/v1`，导致 `memory.add()` / `memory.search()` 返回 401。
+
+**解决方案**: mem0 LLM 的 baseURL 回退链改为 `MEM0_BASE_URL → OPENAI_BASE_URL → 默认 coding 端点`，
+默认使用 `MODEL` 环境变量（qwen3.5-plus），与主聊天模型一致。
+
+**修改文件**:
+
+| 文件 | 变更说明 |
+|------|----------|
+| `src/memory/mem0-factory.ts` | LLM 默认复用 OPENAI_BASE_URL + MODEL |
+| `.env` | 删除 MEM0_BASE_URL 及 MiniMax 残留变量 |
+| `.env.example` | 更新说明：LLM 默认复用主配置 |
+
+**验证结果**:
+
+- `memory.add()` 英文/中文 → 成功提取记忆条目 ✅
+- `memory.search()` 语义检索 → 返回正确结果，相似度分数合理 ✅
+- LLM 智能拆分：\用户住在北京，喜欢周末爬山\ → 拆为两条独立记忆 ✅
+- TypeScript 编译零新增错误 ✅
+
+---
+
 ## 2026-03-14 (2)
 
 ### 本地 Embedding 模型替代线上 API
