@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-03-14 (5)
+
+### Pre-compaction Agentic Flush (OpenClaw style)
+
+**Core change**: Markdown daily memory switched from idle-timer summary to
+**pre-compaction agentic flush**. When WorkingMemory context is about to
+overflow and triggers compression, a silent LLM turn is injected. The LLM
+autonomously decides what is worth persisting to `memory/YYYY-MM-DD.md`.
+At most once per compaction cycle.
+
+**Inspiration**: OpenClaw's 4 memory write triggers, specifically the
+"Pre-compaction memory flush" pattern.
+
+**Modified files**:
+
+| File | Change |
+|------|--------|
+| `src/memory/daily-summarizer.ts` | Rewritten as pre-compaction extraction agent with `extractMemories()` |
+| `src/core/container/init.ts` | Flush callback now uses `DailySummarizer.extractMemories()` with fallback |
+| `src/core/container/tokens.ts` | `IMarkdownMemory` interface gains `writeDailySummary()` |
+| `src/memory/mem0-memory-manager.ts` | Removed `dailyBuffer`/`summaryTimer`/`bufferForDailySummary` idle-timer |
+
+**Design**:
+
+- LLM decides what matters (not every message gets recorded)
+- `NO_REPLY` mechanism: LLM returns nothing if nothing worth saving
+- One flush per compaction cycle (`hasFlushedInCompaction` flag)
+- Graceful fallback: if LLM call fails, raw messages are appended instead
+- Separation of concerns: DI wiring handles flush callback, memory manager focuses on mem0
+
+
 ## 2026-03-14 (4)
 
 ### Markdown 记忆改为 LLM 每日摘要

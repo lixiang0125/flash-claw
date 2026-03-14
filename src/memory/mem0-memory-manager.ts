@@ -4,7 +4,6 @@ import type { WorkingMemory, ConversationMessage } from "./working-memory";
 import type { ShortTermMemory } from "./short-term-memory";
 import type { MarkdownMemory } from "./markdown-memory";
 import type { UserProfileService, UserProfile } from "./user-profile";
-import { DailySummarizer } from "./daily-summarizer";
 
 export interface MemoryEntry {
   id: string;
@@ -59,7 +58,6 @@ interface Mem0MemoryManagerConfig {
   candidateMultiplier: number;
   defaultLimit: number;
   decayHalfLifeHours: number;
-  summaryIdleMs: number;
   weights: {
     semantic: number;
     recency: number;
@@ -71,10 +69,18 @@ const DEFAULT_CONFIG: Mem0MemoryManagerConfig = {
   candidateMultiplier: 2,
   defaultLimit: 10,
   decayHalfLifeHours: 168,
-  summaryIdleMs: 5 * 60 * 1000,
   weights: { semantic: 0.6, recency: 0.3, importance: 0.1 },
 };
 
+/**
+ * Memory manager backed by mem0 (vector LTM) + WorkingMemory + ShortTermMemory.
+ *
+ * Markdown daily logs are written by the pre-compaction agentic flush in
+ * bootstrap.ts (OpenClaw-style), NOT by this class. This class focuses on:
+ *   - Storing interactions to WorkingMemory, ShortTermMemory, and mem0
+ *   - Recalling memories with multi-source fusion
+ *   - User profile management
+ */
 export class Mem0MemoryManager implements IMemoryManager {
   private config: Mem0MemoryManagerConfig;
   private logger: Logger;
@@ -83,10 +89,6 @@ export class Mem0MemoryManager implements IMemoryManager {
   private mem0: Memory;
   private markdownMemory: MarkdownMemory | null;
   private userProfile: UserProfileService;
-  private dailyBuffer: Map<string, Array<{ user: string; assistant: string; sessionId: string }>> = new Map();
-  private summaryTimer: ReturnType<typeof setTimeout> | null = null;
-  private summarizedDates: Set<string> = new Set();
-  private dailySummarizer: DailySummarizer;
 
   constructor(
     logger: Logger,
@@ -104,7 +106,6 @@ export class Mem0MemoryManager implements IMemoryManager {
     this.markdownMemory = markdownMemory;
     this.userProfile = userProfile;
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.dailySummarizer = new DailySummarizer(logger);
   }
 
   async store(
@@ -186,52 +187,12 @@ export class Mem0MemoryManager implements IMemoryManager {
     this.shortTermMemory.upsertSession(sessionId, userId, msg.platform);
     this.shortTermMemory.saveMessage(sessionId, { role: "user", content: userText, timestamp: now });
     this.shortTermMemory.saveMessage(sessionId, { role: "assistant", content: response, timestamp: now });
+    // mem0 LLM extraction (async, non-blocking)
     this.storeTomem0(userText, response, userId, sessionId).catch((err) =>
       this.logger.error("mem0 store failed", { err }),
     );
-    this.bufferForDailySummary(userText, response, sessionId);
-  }
-
-  private bufferForDailySummary(userText: string, assistantText: string, sessionId: string): void {
-    const today = new Date().toISOString().split("T")[0]!;
-    if (!this.dailyBuffer.has(today)) {
-      this.dailyBuffer.set(today, []);
-    }
-    this.dailyBuffer.get(today)!.push({ user: userText, assistant: assistantText, sessionId });
-    if (this.summaryTimer) {
-      clearTimeout(this.summaryTimer);
-    }
-    this.summaryTimer = setTimeout(() => {
-      this.flushDailySummary(today).catch((err) =>
-        this.logger.error("Daily summary flush failed", { err }),
-      );
-    }, this.config.summaryIdleMs);
-  }
-
-  async flushDailySummary(date?: string): Promise<void> {
-    const targetDate = date || new Date().toISOString().split("T")[0]!;
-    const turns = this.dailyBuffer.get(targetDate);
-    if (!turns || turns.length === 0) return;
-    if (!this.markdownMemory) return;
-    this.logger.info(`Generating daily summary for ${targetDate}`, { turns: turns.length });
-    const summary = await this.dailySummarizer.summarize(turns, targetDate);
-    if (summary) {
-      await this.markdownMemory.writeDailySummary(targetDate, summary);
-      this.summarizedDates.add(targetDate);
-      this.dailyBuffer.delete(targetDate);
-      this.logger.info(`Daily summary written for ${targetDate}`);
-    }
-  }
-
-  /** Force flush all buffered days. Call on graceful exit. */
-  async flushAllPending(): Promise<void> {
-    if (this.summaryTimer) {
-      clearTimeout(this.summaryTimer);
-      this.summaryTimer = null;
-    }
-    for (const date of this.dailyBuffer.keys()) {
-      await this.flushDailySummary(date);
-    }
+    // NOTE: Markdown daily logs are handled by pre-compaction agentic flush
+    // in bootstrap.ts, not here. No idle-timer or per-message buffering needed.
   }
 
   private async storeTomem0(userMessage: string, assistantResponse: string, userId: string, sessionId: string): Promise<void> {

@@ -290,6 +290,7 @@ export const SUB_AGENT_SYSTEM: ServiceToken<ISubAgentSystem> =
 export interface IMarkdownMemory {
   initialize(): Promise<void>;
   appendDailyLog(content: string): Promise<string>;
+  writeDailySummary(date: string, summary: string): Promise<string>;
   appendToMemory(content: string, section?: string): Promise<string>;
   searchInFiles(query: string, limit?: number): Promise<unknown[]>;
   getMemoryContent(section?: string): Promise<string>;

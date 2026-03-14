@@ -70,6 +70,7 @@ import { Mem0MemoryManager } from "../../memory/mem0-memory-manager";
 import { createMem0Memory } from "../../memory/mem0-factory";
 import { ContextBudget } from "../../memory/context-budget";
 import { MarkdownMemory } from "../../memory/markdown-memory";
+import { DailySummarizer } from "../../memory/daily-summarizer";
 import { SecurityLayer } from "../../security/security-layer";
 import { PromptBuilder } from "../../agent/prompt-builder";
 import { createHonoApp } from "../../infra/hono-app";
@@ -317,16 +318,33 @@ export function createContainer(): Container {
 
       const workingMemory = new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
 
-      workingMemory.setFlushCallback(async (sessionId, recentMessages) => {
-        const timestamp = new Date().toISOString().split("T")[0];
-        const logContent = recentMessages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => `- **${m.role}**: ${m.content.slice(0, 200)}`)
-          .join("\n");
+      // Pre-compaction agentic flush (OpenClaw-style)
+      // When context nears overflow, a silent LLM turn extracts durable memories
+      const dailySummarizer = new DailySummarizer(logger);
 
-        if (logContent) {
-          await markdownMemory.appendDailyLog(`## ${sessionId.slice(0, 8)}\n${logContent}\n`);
-          logger.debug(`Pre-compaction flush: saved ${recentMessages.length} messages to daily log`);
+      workingMemory.setFlushCallback(async (sessionId, recentMessages) => {
+        const today = new Date().toISOString().split("T")[0]!;
+        try {
+          const extracted = await dailySummarizer.extractMemories(recentMessages, sessionId);
+          if (extracted) {
+            await markdownMemory.writeDailySummary(today, extracted);
+            logger.info(`Pre-compaction agentic flush: wrote memories to ${today}.md`, {
+              sessionId: sessionId.slice(0, 8),
+              length: extracted.length,
+            });
+          } else {
+            logger.debug(`Pre-compaction flush: nothing worth saving (session ${sessionId.slice(0, 8)})`);
+          }
+        } catch (err) {
+          logger.error("Pre-compaction agentic flush failed, falling back to raw log", { err });
+          // Fallback: write raw messages so we don't lose data
+          const logContent = recentMessages
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => `- **${m.role}**: ${m.content.slice(0, 200)}`)
+            .join("\n");
+          if (logContent) {
+            await markdownMemory.appendDailyLog(`## ${sessionId.slice(0, 8)}\n${logContent}\n`);
+          }
         }
       });
 

@@ -121,13 +121,12 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 - **本地优先**：使用 mem0 OSS 本地模式，数据完全存储在本地 SQLite
 - **Bun 兼容**：mem0ai 内部依赖 `better-sqlite3` 原生 addon，Bun 不支持加载。项目通过 `shims/better-sqlite3-bun.js` 透明映射到 `bun:sqlite`，postinstall 脚本自动生效
 
-**5 种记忆写入触发路径**（参考 OpenClaw）：
+**4 种记忆写入触发路径**（参考 OpenClaw）：
 
 | 触发路径 | 写入目标 | 说明 |
 |----------|----------|------|
 | 用户显式指令 | `MEMORY.md` | 用户说"记住这个" |
-| 对话自动记录 | `memory/YYYY-MM-DD.md` | 每次对话自动追加到当日日志 |
-| 预压缩刷写 | `memory/YYYY-MM-DD.md` | 上下文即将溢出时自动保存 |
+| **预压缩 Agentic Flush** | `memory/YYYY-MM-DD.md` | 上下文即将溢出时，LLM 自主判断并提取值得记忆的内容 |
 | 会话重置 | `sessions/` | `/new` 或会话结束时保存 |
 | 周期性综合 | `MEMORY.md` | 从日志提炼持久事实到长期记忆 |
 
