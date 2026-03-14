@@ -4,6 +4,7 @@ import type { WorkingMemory, ConversationMessage } from "./working-memory";
 import type { ShortTermMemory } from "./short-term-memory";
 import type { MarkdownMemory } from "./markdown-memory";
 import type { UserProfileService, UserProfile } from "./user-profile";
+import { DailySummarizer } from "./daily-summarizer";
 
 export interface MemoryEntry {
   id: string;
@@ -58,6 +59,7 @@ interface Mem0MemoryManagerConfig {
   candidateMultiplier: number;
   defaultLimit: number;
   decayHalfLifeHours: number;
+  summaryIdleMs: number;
   weights: {
     semantic: number;
     recency: number;
@@ -69,20 +71,10 @@ const DEFAULT_CONFIG: Mem0MemoryManagerConfig = {
   candidateMultiplier: 2,
   defaultLimit: 10,
   decayHalfLifeHours: 168,
+  summaryIdleMs: 5 * 60 * 1000,
   weights: { semantic: 0.6, recency: 0.3, importance: 0.1 },
 };
 
-/**
- * Memory manager backed by mem0ai/oss (v2.3.0+).
- *
- * Orchestrates three memory tiers:
- *   1. WorkingMemory  – in-process, per-session message buffer
- *   2. ShortTermMemory – SQLite-backed session/message store
- *   3. mem0 (LTM)     – vector-search long-term memory with LLM extraction
- *
- * Also integrates MarkdownMemory for human-readable daily logs
- * and UserProfileService for per-user preferences.
- */
 export class Mem0MemoryManager implements IMemoryManager {
   private config: Mem0MemoryManagerConfig;
   private logger: Logger;
@@ -91,6 +83,10 @@ export class Mem0MemoryManager implements IMemoryManager {
   private mem0: Memory;
   private markdownMemory: MarkdownMemory | null;
   private userProfile: UserProfileService;
+  private dailyBuffer: Map<string, Array<{ user: string; assistant: string; sessionId: string }>> = new Map();
+  private summaryTimer: ReturnType<typeof setTimeout> | null = null;
+  private summarizedDates: Set<string> = new Set();
+  private dailySummarizer: DailySummarizer;
 
   constructor(
     logger: Logger,
@@ -108,16 +104,12 @@ export class Mem0MemoryManager implements IMemoryManager {
     this.markdownMemory = markdownMemory;
     this.userProfile = userProfile;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.dailySummarizer = new DailySummarizer(logger);
   }
-
-  // ---------------------------------------------------------------------------
-  // Store
-  // ---------------------------------------------------------------------------
 
   async store(
     entry: Omit<MemoryEntry, "id" | "accessCount" | "lastAccessedAt">,
   ): Promise<string> {
-    // Always persist to short-term memory for session replay.
     if (entry.sessionId) {
       this.shortTermMemory.saveMessage(entry.sessionId, {
         role: "user",
@@ -125,8 +117,6 @@ export class Mem0MemoryManager implements IMemoryManager {
         timestamp: entry.timestamp,
       });
     }
-
-    // Only promote to long-term memory if importance exceeds threshold.
     if (entry.importance >= 0.3) {
       try {
         const result = await this.mem0.add(entry.content, {
@@ -142,19 +132,12 @@ export class Mem0MemoryManager implements IMemoryManager {
         return crypto.randomUUID();
       }
     }
-
     return crypto.randomUUID();
   }
-
-  // ---------------------------------------------------------------------------
-  // Recall (hybrid: working memory + mem0 vector search)
-  // ---------------------------------------------------------------------------
 
   async recall(query: MemoryQuery): Promise<MemorySearchResult[]> {
     const results: MemorySearchResult[] = [];
     const limit = query.limit || this.config.defaultLimit;
-
-    // Tier 1: Working memory (current session context).
     if (query.sessionId) {
       const recent = this.workingMemory.getRecent(query.sessionId, 5);
       for (const msg of recent) {
@@ -176,97 +159,93 @@ export class Mem0MemoryManager implements IMemoryManager {
         });
       }
     }
-
-    // Tier 3: mem0 long-term vector search.
     try {
       const mem0Results = await this.mem0.search(query.text, {
         userId: query.userId,
         agentId: "flash-claw",
         limit: limit * this.config.candidateMultiplier,
       });
-
-      const items =
-        (mem0Results as unknown as { results?: Array<Record<string, unknown>> })
-          ?.results || [];
+      const items = (mem0Results as unknown as { results?: Array<Record<string, unknown>> })?.results || [];
       for (const item of items) {
         results.push(this.toSearchResult(item, query));
       }
     } catch (err) {
       this.logger.error("mem0 search failed", { err, query: query.text });
     }
-
     return this.dedupeAndSort(results, limit);
   }
-
-  // ---------------------------------------------------------------------------
-  // Store interaction (full chat turn → all tiers)
-  // ---------------------------------------------------------------------------
 
   async storeInteraction(msg: IncomingMessage, response: string): Promise<void> {
     const userId = msg.sender.id;
     const sessionId = msg.conversationId;
     const userText = msg.content.text ?? "";
     const now = Date.now();
-
-    // Tier 1: Working memory.
-    this.workingMemory.append(sessionId, {
-      role: "user",
-      content: userText,
-      timestamp: now,
-    });
-    this.workingMemory.append(sessionId, {
-      role: "assistant",
-      content: response,
-      timestamp: now,
-    });
+    this.workingMemory.append(sessionId, { role: "user", content: userText, timestamp: now });
+    this.workingMemory.append(sessionId, { role: "assistant", content: response, timestamp: now });
     await this.workingMemory.tryFlush(sessionId);
-
-    // Tier 2: Short-term memory.
     this.shortTermMemory.upsertSession(sessionId, userId, msg.platform);
-    this.shortTermMemory.saveMessage(sessionId, {
-      role: "user",
-      content: userText,
-      timestamp: now,
-    });
-    this.shortTermMemory.saveMessage(sessionId, {
-      role: "assistant",
-      content: response,
-      timestamp: now,
-    });
-
-    // Tier 3: mem0 long-term (async, non-blocking).
+    this.shortTermMemory.saveMessage(sessionId, { role: "user", content: userText, timestamp: now });
+    this.shortTermMemory.saveMessage(sessionId, { role: "assistant", content: response, timestamp: now });
     this.storeTomem0(userText, response, userId, sessionId).catch((err) =>
       this.logger.error("mem0 store failed", { err }),
     );
-
-    // Side-channel: Markdown daily log.
-    this.appendMarkdownLog(userText, sessionId).catch(() => {});
+    this.bufferForDailySummary(userText, response, sessionId);
   }
 
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
+  private bufferForDailySummary(userText: string, assistantText: string, sessionId: string): void {
+    const today = new Date().toISOString().split("T")[0]!;
+    if (!this.dailyBuffer.has(today)) {
+      this.dailyBuffer.set(today, []);
+    }
+    this.dailyBuffer.get(today)!.push({ user: userText, assistant: assistantText, sessionId });
+    if (this.summaryTimer) {
+      clearTimeout(this.summaryTimer);
+    }
+    this.summaryTimer = setTimeout(() => {
+      this.flushDailySummary(today).catch((err) =>
+        this.logger.error("Daily summary flush failed", { err }),
+      );
+    }, this.config.summaryIdleMs);
+  }
 
-  private async storeTomem0(
-    userMessage: string,
-    assistantResponse: string,
-    userId: string,
-    sessionId: string,
-  ): Promise<void> {
+  async flushDailySummary(date?: string): Promise<void> {
+    const targetDate = date || new Date().toISOString().split("T")[0]!;
+    const turns = this.dailyBuffer.get(targetDate);
+    if (!turns || turns.length === 0) return;
+    if (!this.markdownMemory) return;
+    this.logger.info(`Generating daily summary for ${targetDate}`, { turns: turns.length });
+    const summary = await this.dailySummarizer.summarize(turns, targetDate);
+    if (summary) {
+      await this.markdownMemory.writeDailySummary(targetDate, summary);
+      this.summarizedDates.add(targetDate);
+      this.dailyBuffer.delete(targetDate);
+      this.logger.info(`Daily summary written for ${targetDate}`);
+    }
+  }
+
+  /** Force flush all buffered days. Call on graceful exit. */
+  async flushAllPending(): Promise<void> {
+    if (this.summaryTimer) {
+      clearTimeout(this.summaryTimer);
+      this.summaryTimer = null;
+    }
+    for (const date of this.dailyBuffer.keys()) {
+      await this.flushDailySummary(date);
+    }
+  }
+
+  private async storeTomem0(userMessage: string, assistantResponse: string, userId: string, sessionId: string): Promise<void> {
     const messages = [
       { role: "user" as const, content: userMessage },
       { role: "assistant" as const, content: assistantResponse },
     ];
-
     const result = await this.mem0.add(messages, {
       userId,
       agentId: "flash-claw",
       runId: sessionId,
       metadata: { source: "chat", timestamp: Date.now() },
     });
-
-    const results =
-      (result as unknown as { results?: Array<{ event: string }> })?.results || [];
+    const results = (result as unknown as { results?: Array<{ event: string }> })?.results || [];
     const stats = {
       added: results.filter((r) => r.event === "ADD").length,
       updated: results.filter((r) => r.event === "UPDATE").length,
@@ -276,46 +255,23 @@ export class Mem0MemoryManager implements IMemoryManager {
     this.logger.info("mem0 store completed", { userId, sessionId, ...stats });
   }
 
-  private async appendMarkdownLog(userMessage: string, sessionId: string): Promise<void> {
-    if (!this.markdownMemory) return;
-
-    const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-    const logLine = `- **${time}** [${sessionId.slice(0, 8)}] ${userMessage.slice(0, 120)}\n`;
-    await this.markdownMemory.appendDailyLog(logLine);
-  }
-
-  private toSearchResult(
-    item: Record<string, unknown>,
-    query: MemoryQuery,
-  ): MemorySearchResult {
+  private toSearchResult(item: Record<string, unknown>, query: MemoryQuery): MemorySearchResult {
     const now = Date.now();
-    const createdAt = item.created_at
-      ? new Date(item.created_at as string).getTime()
-      : now;
+    const createdAt = item.created_at ? new Date(item.created_at as string).getTime() : now;
     const ageMs = now - createdAt;
     const halfLifeMs = this.config.decayHalfLifeHours * 3600 * 1000;
-
     const semanticScore = (item.score as number) ?? 0;
     const recencyScore = Math.exp((-0.693 * ageMs) / halfLifeMs);
-    const importanceScore =
-      ((item.metadata as Record<string, unknown>)?.importance as number) ?? 0.5;
-
+    const importanceScore = ((item.metadata as Record<string, unknown>)?.importance as number) ?? 0.5;
     const { weights } = this.config;
-    const relevanceScore =
-      semanticScore * weights.semantic +
-      recencyScore * weights.recency +
-      importanceScore * weights.importance;
-
+    const relevanceScore = semanticScore * weights.semantic + recencyScore * weights.recency + importanceScore * weights.importance;
     return {
       entry: {
         id: (item.id as string) || "",
         content: (item.memory as string) || "",
-        type:
-          ((item.metadata as Record<string, unknown>)?.type as MemoryEntry["type"]) ||
-          "fact",
+        type: ((item.metadata as Record<string, unknown>)?.type as MemoryEntry["type"]) || "fact",
         userId: (item.user_id as string) || query.userId,
-        sessionId: (item.metadata as Record<string, unknown>)
-          ?.session_id as string,
+        sessionId: (item.metadata as Record<string, unknown>)?.session_id as string,
         timestamp: createdAt,
         importance: importanceScore,
         accessCount: 0,
@@ -323,18 +279,11 @@ export class Mem0MemoryManager implements IMemoryManager {
         metadata: item.metadata as Record<string, unknown>,
       },
       relevanceScore,
-      scores: {
-        semantic: semanticScore,
-        recency: recencyScore,
-        importance: importanceScore,
-      },
+      scores: { semantic: semanticScore, recency: recencyScore, importance: importanceScore },
     };
   }
 
-  private dedupeAndSort(
-    results: MemorySearchResult[],
-    limit: number,
-  ): MemorySearchResult[] {
+  private dedupeAndSort(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
     const seen = new Set<string>();
     const deduped = results.filter((r) => {
       const key = r.entry.content.slice(0, 100);
@@ -346,36 +295,6 @@ export class Mem0MemoryManager implements IMemoryManager {
     return deduped.slice(0, limit);
   }
 
-  // ---------------------------------------------------------------------------
-  // Markdown session export
-  // ---------------------------------------------------------------------------
-
-  async saveSessionToMarkdown(sessionId: string): Promise<void> {
-    if (!this.markdownMemory) return;
-
-    const messages = this.workingMemory.getMessages(sessionId);
-    if (!messages || messages.length === 0) return;
-
-    const content = messages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => {
-        const emoji = m.role === "user" ? "👤" : "🤖";
-        return `${emoji} **${m.role}**: ${m.content.slice(0, 200)}`;
-      })
-      .join("\n\n");
-
-    const header = `## ${sessionId.slice(0, 8)}\n时间: ${new Date().toLocaleString("zh-CN")}\n\n`;
-    await this.markdownMemory
-      .appendDailyLog(header + content + "\n\n---\n\n")
-      .catch((err) =>
-        this.logger.error("Failed to save session to markdown", { err }),
-      );
-  }
-
-  // ---------------------------------------------------------------------------
-  // User profile
-  // ---------------------------------------------------------------------------
-
   async getUserProfile(userId: string): Promise<UserProfile> {
     return this.userProfile.getProfile(userId);
   }
@@ -384,39 +303,14 @@ export class Mem0MemoryManager implements IMemoryManager {
     return this.userProfile.updateProfile(userId, updates);
   }
 
-  // ---------------------------------------------------------------------------
-  // Maintenance
-  // ---------------------------------------------------------------------------
-
   async cleanup(maxAge?: number): Promise<number> {
     return this.shortTermMemory.cleanup();
   }
 
-  // ---------------------------------------------------------------------------
-  // Direct mem0 operations (for admin / debug)
-  // ---------------------------------------------------------------------------
-
-  async getMemory(memoryId: string) {
-    return this.mem0.get(memoryId);
-  }
-
-  async updateMemory(memoryId: string, content: string) {
-    return this.mem0.update(memoryId, content);
-  }
-
-  async deleteMemory(memoryId: string) {
-    return this.mem0.delete(memoryId);
-  }
-
-  async deleteAllMemories(userId: string) {
-    return this.mem0.deleteAll({ userId, agentId: "flash-claw" });
-  }
-
-  async listMemories(userId: string, limit = 100) {
-    return this.mem0.getAll({ userId, agentId: "flash-claw", limit });
-  }
-
-  async getMemoryHistory(memoryId: string) {
-    return this.mem0.history(memoryId);
-  }
+  async getMemory(memoryId: string) { return this.mem0.get(memoryId); }
+  async updateMemory(memoryId: string, content: string) { return this.mem0.update(memoryId, content); }
+  async deleteMemory(memoryId: string) { return this.mem0.delete(memoryId); }
+  async deleteAllMemories(userId: string) { return this.mem0.deleteAll({ userId, agentId: "flash-claw" }); }
+  async listMemories(userId: string, limit = 100) { return this.mem0.getAll({ userId, agentId: "flash-claw", limit }); }
+  async getMemoryHistory(memoryId: string) { return this.mem0.history(memoryId); }
 }

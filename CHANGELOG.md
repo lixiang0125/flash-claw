@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-03-14 (4)
+
+### Markdown 记忆改为 LLM 每日摘要
+
+**核心变更**: Markdown 每日记录从逐条消息追加改为 LLM 生成的每日摘要。对话 turn
+在内存中缓冲，空闲 5 分钟后触发 DailySummarizer 生成精炼 digest，写入
+`data/workspace/memory/YYYY-MM-DD.md`。
+
+**新增文件**:
+
+| 文件 | 说明 |
+|------|------|
+| `src/memory/daily-summarizer.ts` | DailySummarizer — 使用主 LLM 将对话摘要为结构化 Markdown |
+
+**修改文件**:
+
+| 文件 | 变更说明 |
+|------|----------|
+| `src/memory/mem0-memory-manager.ts` | 移除逐条 appendMarkdownLog，改为 dailyBuffer + idle timer + flushDailySummary |
+| `src/memory/markdown-memory.ts` | 新增 writeDailySummary() 方法（整体覆写而非追加） |
+| `src/memory/index.ts` | 导出 DailySummarizer |
+
+**设计要点**:
+
+- **缓冲 + 空闲触发**: 每次 storeInteraction 将 turn 压入 dailyBuffer，重置 5 分钟 idle timer
+- **LLM 摘要**: 使用主 LLM (MODEL 变量) 将所有 turns 总结为分类 bullet points
+- **覆写模式**: writeDailySummary 整体覆写当天文件，而非追加，保证可读性
+- **优雅退出**: flushAllPending() 在进程退出前强制刷写所有缓冲
+
+**验证结果**:
+
+- TypeScript 编译零新增错误 ✅
+- DailySummarizer 对 3 轮对话生成了 245 字的结构化摘要 ✅
+- 摘要按主题分类（系统配置、待办事项等），非逐条堆砌 ✅
+
+---
+
 ## 2026-03-14 (3)
 
 ### mem0 LLM 切换为 coding 端点

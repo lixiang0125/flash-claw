@@ -99,6 +99,29 @@ export class MarkdownMemory {
     return memoryPath;
   }
 
+
+  /**
+   * Write (or overwrite) the daily summary for a given date.
+   * Unlike appendDailyLog, this replaces the entire file content with
+   * an LLM-generated summary, producing a clean, readable digest.
+   */
+  async writeDailySummary(date: string, summary: string): Promise<string> {
+    if (!this.config.workspacePath || !this.config.enableDailyLogs) {
+      return "";
+    }
+
+    const logPath = path.join(this.config.workspacePath, "memory", `${date}.md`);
+    const content = `# ${date} Daily Summary
+
+${summary}
+`;
+
+    await fs.writeFile(logPath, content);
+    this.logger.debug(`Daily summary written: ${logPath}`);
+
+    return logPath;
+  }
+
   async searchInFiles(query: string, limit = 10): Promise<MemoryFileResult[]> {
     if (!this.config.workspacePath) return [];
 

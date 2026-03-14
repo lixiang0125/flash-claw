@@ -19,3 +19,4 @@ export type {
 export { createMem0Memory, type Mem0FactoryOptions } from "./mem0-factory";
 export { patchEmbedderBaseURL, patchEmbedderLocal } from "./mem0-embedder-patch";
 export { LocalTransformersEmbedder } from "./local-embedder";
+export { DailySummarizer } from "./daily-summarizer";
