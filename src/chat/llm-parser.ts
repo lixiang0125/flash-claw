@@ -57,6 +57,45 @@ function getModel(): string {
 }
 
 // ---------------------------------------------------------------------------
+// LRU cache — avoids duplicate LLM calls for the same message
+// ---------------------------------------------------------------------------
+
+class LRUCache<V> {
+  private map = new Map<string, { value: V; ts: number }>();
+
+  constructor(
+    private maxSize: number = 128,
+    private ttlMs: number = 5 * 60_000, // 5 min default
+  ) {}
+
+  get(key: string): V | undefined {
+    const entry = this.map.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > this.ttlMs) {
+      this.map.delete(key);
+      return undefined;
+    }
+    // Move to end (most-recently used)
+    this.map.delete(key);
+    this.map.set(key, entry);
+    return entry.value;
+  }
+
+  set(key: string, value: V): void {
+    this.map.delete(key); // refresh position
+    if (this.map.size >= this.maxSize) {
+      // Evict oldest (first entry)
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
+    this.map.set(key, { value, ts: Date.now() });
+  }
+}
+
+const taskCache = new LRUCache<ParsedTask | null>(128, 5 * 60_000);
+const memoryQueryCache = new LRUCache<string>(256, 3 * 60_000);
+
+// ---------------------------------------------------------------------------
 // System prompts
 // ---------------------------------------------------------------------------
 
@@ -132,6 +171,9 @@ Rules:
 export async function parseTaskWithLLM(
   message: string,
 ): Promise<ParsedTask | null> {
+  const cached = taskCache.get(message);
+  if (cached !== undefined) return cached;
+
   try {
     const client = getClient();
 
@@ -156,19 +198,21 @@ export async function parseTaskWithLLM(
 
     const parsed: LLMTaskResponse = JSON.parse(cleaned);
 
-    if (!parsed.isTask) return null;
+    if (!parsed.isTask) { taskCache.set(message, null); return null; }
 
     // Validate required fields
-    if (!parsed.name || !parsed.message || !parsed.type) return null;
+    if (!parsed.name || !parsed.message || !parsed.type) { taskCache.set(message, null); return null; }
 
     if (parsed.type === "once") {
       if (typeof parsed.executeAfter !== "number" || parsed.executeAfter <= 0) return null;
-      return {
+      const result: ParsedTask = {
         name: parsed.name,
         message: parsed.message,
         type: "once",
         executeAfter: parsed.executeAfter,
       };
+      taskCache.set(message, result);
+      return result;
     }
 
     if (parsed.type === "recurring") {
@@ -176,17 +220,20 @@ export async function parseTaskWithLLM(
       // Basic cron validation: must be 5 space-separated fields
       const cronParts = parsed.schedule.trim().split(/\s+/);
       if (cronParts.length !== 5) return null;
-      return {
+      const result: ParsedTask = {
         name: parsed.name,
         message: parsed.message,
         type: "recurring",
         schedule: parsed.schedule.trim(),
       };
+      taskCache.set(message, result);
+      return result;
     }
 
+    taskCache.set(message, null);
     return null;
   } catch {
-    // Network error, JSON parse error, timeout — all silently return null
+    // Network error, JSON parse error, timeout — don't cache (transient failure)
     return null;
   }
 }
@@ -205,6 +252,9 @@ export async function parseTaskWithLLM(
 export async function rewriteMemoryQuery(
   message: string,
 ): Promise<string> {
+  const cached = memoryQueryCache.get(message);
+  if (cached !== undefined) return cached;
+
   try {
     const client = getClient();
 
@@ -224,6 +274,7 @@ export async function rewriteMemoryQuery(
     // Sanity check: if the response is unreasonably long, fall back
     if (raw.length > 200) return message;
 
+    memoryQueryCache.set(message, raw);
     return raw;
   } catch {
     // On any failure, return the original message — always safe
