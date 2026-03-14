@@ -1,5 +1,42 @@
 # Changelog
 
+## 2025-03-15 (12)
+
+### 单元测试 + 集成测试全面补充
+
+**engine.test.ts — ChatEngine 单元测试** (23 test cases):
+- DI 注入: setWorkingMemory / setTools / setToolExecutor / setMemoryManager / setTaskScheduler 5 项
+- getHistoryMessages: 未注入 WM 返回空、注入后读取、追加后即时可读 3 项
+- clearSession: 清除消息、清除 sessionSkills、无 WM 时不崩溃 3 项
+- chat() 核心流程: 消息追加到 WM、storeInteraction 写长期记忆、response+sessionId 返回、
+  默认 sessionId、LLM 失败优雅降级、自动压缩触发、tool_calls 执行、MAX_STEPS(10) 限制、
+  memoryManager.recall 记忆上下文 9 项
+- parseAndScheduleTask: 无关键词不触发、无 scheduler 不报错 2 项
+- 边界情况: 空消息不崩溃 1 项
+- 关键技术: `mock.module()` 拦截 llm-parser 避免真实 HTTP 调用
+
+**working-memory.test.ts — WorkingMemory 单元测试** (29 test cases):
+- 构造函数/配置: 默认值、部分覆盖、配置副本隔离 3 项
+- append 消息追加: 基本追加、maxMessages 裁剪、maxTokens 裁剪保留 system、
+  中文 token 估算、混合文本 token 估算 5 项
+- appendBatch 批量追加: 批量写入、maxMessages 限制 2 项
+- getMessages/getRecent: 未知 session 空数组、全部消息、最近 N 条、count 超限 4 项
+- clear/clearAll/resetSession: 删除单个、删除全部、flushCallback 触发、无 callback 4 项
+- compress 压缩: 低于阈值空操作、达到阈值压缩保留最近 10 条、summarizer 接收正确消息、
+  压缩前调用 tryFlush、多次压缩周期 flush 重复触发 5 项
+- shouldFlush/tryFlush: flush 禁用返回 false、同周期已 flush 返回 false、超阈值触发 3 项
+- getStats/getTokenUsage/activeSessionCount 3 项
+
+**integration.test.ts — DI 链路集成测试** (11 test cases):
+- bootstrap 模拟: 手动组装 DI 链路验证组件引用 1 项
+- WM→ChatEngine 数据流: chat() 写入 WM、历史上下文传递、clearSession 清除 3 项
+- FeishuBot→ChatEngine 路由: 飞书事件处理、未注入 ChatEngine 错误、URL 验证 3 项
+- 完整 E2E: 消息流(飞书→引擎→记忆)、多轮对话、多会话隔离、任务关键词检测 4 项
+- 关键技术: `wireAll()` 辅助函数模拟 bootstrap 组装，真实 WM + mock OpenAI
+
+**测试结果**: 88 pass / 1 skip / 1 fail(pre-existing dockerode) across 8 files
+
+
 ## 2025-03-15 (11)
 
 ### 三项优化 + Unicode 修复 + 中文注释补充
