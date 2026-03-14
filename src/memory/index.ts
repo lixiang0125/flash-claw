@@ -17,4 +17,5 @@ export type {
   MemorySearchResult,
 } from "./mem0-memory-manager";
 export { createMem0Memory, type Mem0FactoryOptions } from "./mem0-factory";
-export { patchEmbedderBaseURL } from "./mem0-embedder-patch";
+export { patchEmbedderBaseURL, patchEmbedderLocal } from "./mem0-embedder-patch";
+export { LocalTransformersEmbedder } from "./local-embedder";

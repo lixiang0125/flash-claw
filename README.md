@@ -9,6 +9,7 @@
 - **AI**: OpenAI SDK (DashScope 阿里云百炼) + Qwen Function Calling
 - **前端**: React 19 + Vite
 - **数据库**: SQLite (bun:sqlite) + mem0ai v2.3.0 OSS (本地向量搜索, better-sqlite3→bun:sqlite shim)
+- **Embedding**: 本地 @xenova/transformers (Xenova/multilingual-e5-small, 384d) — 无需外部 API
 - **DI 容器**: 自研 IoC 容器 (Singleton/Transient/Scoped 生命周期)
 
 ## 功能特性
@@ -47,14 +48,13 @@ OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
 MODEL=qwen3.5-plus
 
-# mem0 记忆系统 (需要通用 DashScope 端点，支持 embedding)
-DASHSCOPE_API_KEY=sk-your-general-dashscope-key
+# mem0 记忆系统
 MEM0_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MEM0_LLM_MODEL=qwen-plus
-MEM0_EMBEDDING_MODEL=text-embedding-v3
+# Embedding 默认使用本地模型，无需额外 API key
+MEM0_EMBEDDING_MODE=local
 ```
 
-> **注意**: `coding.dashscope.aliyuncs.com` 不支持 embedding 模型。mem0 需要单独配置 `MEM0_BASE_URL` 指向通用端点。
+> **注意**: Embedding 默认使用本地 `Xenova/multilingual-e5-small` 模型，首次运行会自动下载 (~100MB)。如需切换为远程 API，设置 `MEM0_EMBEDDING_MODE=remote` 并配置相应 API key。
 
 ### 运行
 

@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { LocalTransformersEmbedder } from "./local-embedder";
 
 /**
  * Monkey-patch the mem0 Memory instance's embedder to use a custom baseURL.
@@ -52,4 +53,25 @@ export function patchEmbedderBaseURL(
       "it may be using a non-OpenAI provider. Skipping baseURL patch.",
     );
   }
+}
+
+/**
+ * Replace the mem0 Memory instance's entire embedder with a local
+ * @xenova/transformers-based embedder. This avoids any remote API calls
+ * for embedding — all vectors are computed locally.
+ *
+ * @param memoryInstance - The mem0 `Memory` object.
+ * @param localEmbedder  - A ready (or lazy-loading) LocalTransformersEmbedder.
+ */
+export function patchEmbedderLocal(
+  memoryInstance: unknown,
+  localEmbedder: LocalTransformersEmbedder,
+): void {
+  const mem = memoryInstance as Record<string, unknown>;
+  if (!("embedder" in mem)) {
+    throw new Error(
+      "[mem0-patch] Memory instance does not have an embedder property.",
+    );
+  }
+  mem.embedder = localEmbedder;
 }

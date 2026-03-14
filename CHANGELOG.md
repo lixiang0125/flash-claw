@@ -1,5 +1,69 @@
 # Changelog
 
+## 2026-03-14 (2)
+
+### 本地 Embedding 模型替代线上 API
+
+**核心变更**: 将 mem0 的 Embedding 服务从线上 MiniMax API (embo-01, 1024d) 切换为本地
+`@xenova/transformers` 模型 (`Xenova/multilingual-e5-small`, 384d)，消除对外部 Embedding
+API 的依赖，数据完全不出本地。
+
+**新增文件**:
+
+| 文件 | 说明 |
+|------|------|
+| `src/memory/local-embedder.ts` | LocalTransformersEmbedder — 封装 @xenova/transformers，提供 mem0 兼容的 embed() 接口 |
+
+**修改文件**:
+
+| 文件 | 变更说明 |
+|------|----------|
+| `src/memory/mem0-embedder-patch.ts` | 新增 `patchEmbedderLocal()` — 将 mem0 embedder 整体替换为本地实例 |
+| `src/memory/mem0-factory.ts` | 支持 `embeddingMode: "local" \| "remote"`，默认 local；使用 `Xenova/multilingual-e5-small` |
+| `src/memory/index.ts` | 导出 `LocalTransformersEmbedder` 和 `patchEmbedderLocal` |
+| `.env` | 切换为 local 模式，维度 1024 → 384 |
+| `.env.example` | 格式与 .env 对齐，添加 local/remote 双模式说明 |
+
+**删除文件**:
+
+| 文件 | 说明 |
+|------|------|
+| `test-minimax-embed.ts` | 清理 MiniMax 测试文件 |
+| `data/mem0_vectors.db*` | 清理旧 1024d 向量库（维度不兼容） |
+
+**技术细节**:
+
+- **模型**: `Xenova/multilingual-e5-small` — 多语言支持，384 维，~100MB ONNX，<0.5B 参数
+- **加载策略**: 懒加载 — ONNX pipeline 在首次 embed() 调用时加载，不阻塞启动
+- **monkey-patch**: `patchEmbedderLocal()` 直接替换 mem0 Memory 实例的 `embedder` 属性
+- **createMem0Memory()** 保持同步返回，DI 容器无需修改
+- **向后兼容**: 设置 `MEM0_EMBEDDING_MODE=remote` 可切回线上 API
+
+**验证结果**:
+
+- TypeScript 编译零新增错误 ✅
+- `LocalTransformersEmbedder.embed()` 英文/中文均产出 384d 归一化向量 ✅
+- `createMem0Memory()` 成功实例化，embedder 被正确替换 ✅
+- L2 范数 = 1.000000 ✅
+
+**环境配置说明**:
+
+```
+# 本地 Embedding（默认，无需额外 API key）
+MEM0_EMBEDDING_MODE=local
+MEM0_LOCAL_MODEL=Xenova/multilingual-e5-small
+MEM0_EMBEDDING_DIMS=384
+
+# 远程 Embedding（可选）
+# MEM0_EMBEDDING_MODE=remote
+# MEMO_API_KEY=your-key
+# MEM0_EMBEDDING_BASE_URL=https://api.minimax.io/v1
+# MEM0_EMBEDDING_MODEL=embo-01
+# MEM0_EMBEDDING_DIMS=1024
+```
+
+---
+
 ## 2026-03-14
 
 ### mem0 Bun 运行时兼容性修复 & 数据目录整理
