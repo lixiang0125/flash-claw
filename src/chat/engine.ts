@@ -2,7 +2,8 @@ import OpenAI from "openai";
 import { listSkills, type Skill } from "../skills";
 import { userProfileStore } from "../profiles";
 import { type IMemoryManager, type UserProfile } from "../memory";
-import { parseTaskFromMessage, cronToHumanReadable } from "./parsers";
+import { parseTaskWithLLM, rewriteMemoryQuery } from "./llm-parser";
+import { cronToHumanReadable } from "./parsers";
 import type { ChatRequest, ChatResponse } from "./types";
 import { ErrorSanitizer } from "../infra/error-handler";
 
@@ -109,7 +110,7 @@ class ChatEngine {
 
       let relevantMemories = "";
       if (this.memoryManager) {
-        const searchText = this.buildMemorySearchText(message);
+        const searchText = await rewriteMemoryQuery(message);
 
         const memResults = await this.memoryManager.recall({
           text: searchText,
@@ -236,31 +237,6 @@ class ChatEngine {
     }
   }
 
-  private buildMemorySearchText(message: string): string {
-    const msg = message.toLowerCase();
-
-    if (/我是谁|我的名字|我叫|我叫什么|认识我|知道我|who am i|my name/i.test(msg)) {
-      return "用户事实 名字 身份 职业 工作 学习";
-    }
-
-    if (/记得|之前|以前|上次|从前|曾经|过去|remember|past|before/i.test(msg)) {
-      return "用户事实 用户偏好 对话 历史";
-    }
-
-    if (/喜欢|偏好|习惯|讨厌|不爱|prefer|like|hate/i.test(msg)) {
-      return "用户偏好 兴趣 习惯";
-    }
-
-    if (/住在哪里|哪里人|来自|居住|live|from|location/i.test(msg)) {
-      return "用户事实 地点 位置 城市";
-    }
-
-    if (/工作|职业|做什么|做啥|work|job|occupation/i.test(msg)) {
-      return "用户事实 工作 职业 职位";
-    }
-
-    return message;
-  }
 
   private buildSystemPrompt(skills: Skill[]): string {
     let prompt = "You are a helpful AI assistant.";
@@ -303,7 +279,7 @@ class ChatEngine {
       return null; // TaskScheduler not wired yet
     }
 
-    const task = parseTaskFromMessage(message);
+    const task = await parseTaskWithLLM(message);
     if (!task) return null;
 
     try {

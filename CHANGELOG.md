@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-03-15 (8)
+
+### LLM-based task parsing, JSON storage, memory query rewriting
+
+**Motivation**: Regex-based task parsing cannot handle multilingual input. SQLite storage is opaque. Hardcoded memory search keywords only work for Chinese.
+
+**Changes**:
+
+- **`src/chat/llm-parser.ts`** (new implementation):
+  - `parseTaskWithLLM(message)` — LLM-based task scheduling intent detection
+  - Handles any language (Chinese, English, Japanese, Korean, etc.)
+  - Returns structured `ParsedTask` with cron expression or executeAfter (ms)
+  - Distinguishes past-tense ("3 minutes ago") from future scheduling ("in 3 minutes")
+  - Low temperature (0.1), short max_tokens (200), 10s timeout for speed
+  - `rewriteMemoryQuery(message)` — LLM-based memory search query rewriting
+  - Generates 3-5 language-agnostic keywords for vector memory retrieval
+  - Replaces hardcoded Chinese regex patterns in `buildMemorySearchText()`
+
+- **`src/tasks/index.ts`** (rewritten — JSON storage):
+  - Replaced SQLite (`bun:sqlite`) with `data/cron/jobs.json` file storage
+  - OpenClaw-compatible JSON structure: `{version, jobs: [{id, name, schedule, state, runs}]}`
+  - Three schedule kinds: `cron` (recurring), `every` (interval), `at` (one-time)
+  - Human-readable 2-space-indented JSON, git-friendly
+  - Task runs stored inline per job (last 50, auto-pruned)
+  - All scheduling logic preserved (concurrent guard, 24h setTimeout cap, poll)
+  - All public API unchanged
+
+- **`src/chat/engine.ts`** (updated):
+  - `parseAndScheduleTask()` now calls `parseTaskWithLLM()` instead of regex `parseTaskFromMessage()`
+  - Memory recall now calls `rewriteMemoryQuery()` instead of `buildMemorySearchText()`
+  - Removed `buildMemorySearchText()` method entirely
+
 ## 2026-03-14 (7)
 
 ### Cron task system audit & fix

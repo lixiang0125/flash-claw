@@ -1,12 +1,16 @@
-import { Database } from "bun:sqlite";
 import { CronExpressionParser } from "cron-parser";
+import fs from "fs";
 import path from "path";
+
+// ---------------------------------------------------------------------------
+// Public interfaces — kept compatible with the old SQLite-backed API
+// ---------------------------------------------------------------------------
 
 export interface Task {
   id: string;
   name: string;
   message: string;
-  schedule: string;
+  schedule: string;          // external-facing: cron expr, "once", or "every:<ms>"
   enabled: boolean;
   lastRun?: string;
   nextRun?: string;
@@ -23,45 +27,89 @@ export interface TaskRun {
   finishedAt?: string;
 }
 
-/**
- * Task execution callback.
- * The scheduler no longer hard-imports chatEngine/feishuBot.
- * Instead, bootstrap.ts wires these at startup via setExecutor/setNotifier.
- */
+// ---------------------------------------------------------------------------
+// Internal JSON-file types (OpenClaw-style jobs.json)
+// ---------------------------------------------------------------------------
+
+interface ScheduleCron  { kind: "cron";  expr: string }
+interface ScheduleEvery { kind: "every"; everyMs: number }
+interface ScheduleAt    { kind: "at";    at: string }
+type Schedule = ScheduleCron | ScheduleEvery | ScheduleAt;
+
+interface JobState {
+  lastRunAt: string | null;
+  lastStatus: "success" | "failed" | null;
+  lastDurationMs: number | null;
+  consecutiveErrors: number;
+}
+
+interface RunRecord {
+  id: string;
+  status: "success" | "failed" | "running";
+  output?: string;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+interface Job {
+  id: string;
+  name: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  schedule: Schedule;
+  message: string;
+  state: JobState;
+  runs: RunRecord[];
+}
+
+interface JobsFile {
+  version: number;
+  jobs: Job[];
+}
+
+// ---------------------------------------------------------------------------
+// DI callback types
+// ---------------------------------------------------------------------------
+
 type TaskExecutor = (taskMessage: string, taskId: string) => Promise<string>;
 type TaskNotifier = (taskName: string, result: string) => Promise<void>;
 
-class TaskScheduler {
-  private db: InstanceType<typeof Database>;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const MAX_RUNS_PER_JOB = 50;
+
+function generateId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ---------------------------------------------------------------------------
+// TaskScheduler — JSON-file backed, OpenClaw architecture
+// ---------------------------------------------------------------------------
+
+export class TaskScheduler {
+  private filePath: string;
+  private data: JobsFile;
   private timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private isRunning = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private executor: TaskExecutor | null = null;
   private notifier: TaskNotifier | null = null;
-  private executing = new Set<string>(); // guard against concurrent runs
+  private executing = new Set<string>();
   private lastChatId: string | null = null;
 
-  constructor(db?: InstanceType<typeof Database>) {
-    const customDbPath = process.env.TASKS_DB_PATH;
-    const dbPath =
-      customDbPath || path.join(process.cwd(), "data", "flashclaw.db");
+  constructor(filePath?: string) {
+    const custom = process.env.TASKS_JSON_PATH;
+    this.filePath =
+      filePath || custom || path.join(process.cwd(), "data", "cron", "jobs.json");
 
-    if (db) {
-      this.db = db;
-    } else {
-      const fs = require("fs");
-      const dir = path.dirname(dbPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      this.db = new Database(dbPath);
-    }
-    this.initTables();
-    // NOTE: startScheduler() is no longer called in constructor.
-    // Call start() explicitly after wiring executor/notifier.
+    this.data = this.readFile();
   }
 
-  // ---- Dependency injection (called from bootstrap.ts) ----
+  // ---- Dependency injection ------------------------------------------------
 
   setExecutor(fn: TaskExecutor): void {
     this.executor = fn;
@@ -79,45 +127,114 @@ class TaskScheduler {
     return this.lastChatId;
   }
 
-  // ---- Schema ----
+  // ---- File I/O ------------------------------------------------------------
 
-  private initTables(): void {
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        message TEXT NOT NULL,
-        schedule TEXT NOT NULL,
-        enabled INTEGER DEFAULT 1,
-        last_run TEXT,
-        next_run TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS task_runs (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        output TEXT,
-        error TEXT,
-        started_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        finished_at TEXT,
-        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-      )
-    `);
+  private readFile(): JobsFile {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const raw = fs.readFileSync(this.filePath, "utf-8");
+        return JSON.parse(raw) as JobsFile;
+      }
+    } catch (err) {
+      console.error("[TaskScheduler] Failed to read jobs file, starting fresh:", err);
+    }
+    return { version: 1, jobs: [] };
   }
 
-  // ---- CRUD ----
+  private writeFile(): void {
+    const dir = path.dirname(this.filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), "utf-8");
+  }
+
+  // ---- Schedule helpers ----------------------------------------------------
+
+  /**
+   * Convert an internal Schedule object to the external `schedule` string
+   * that the old API consumers expect.
+   */
+  private scheduleToString(s: Schedule): string {
+    switch (s.kind) {
+      case "cron":  return s.expr;
+      case "every": return `every:${s.everyMs}`;
+      case "at":    return "once";
+    }
+  }
+
+  /**
+   * Convert the external `schedule` string to an internal Schedule object.
+   */
+  private stringToSchedule(s: string): Schedule {
+    if (s === "once") {
+      // One-time tasks get their `at` filled in by the caller.
+      // This path shouldn't normally be hit for new creation,
+      // but handle it defensively.
+      return { kind: "at", at: new Date().toISOString() };
+    }
+    if (s.startsWith("every:")) {
+      return { kind: "every", everyMs: parseInt(s.slice(6), 10) };
+    }
+    return { kind: "cron", expr: s };
+  }
+
+  /**
+   * Calculate next-run ISO string for a given schedule.
+   */
+  private calculateNextRun(schedule: Schedule): string | null {
+    switch (schedule.kind) {
+      case "cron": {
+        try {
+          const interval = CronExpressionParser.parse(schedule.expr);
+          return interval.next().toDate().toISOString();
+        } catch {
+          return null;
+        }
+      }
+      case "every": {
+        return new Date(Date.now() + schedule.everyMs).toISOString();
+      }
+      case "at": {
+        // For one-time tasks, nextRun is the `at` timestamp itself
+        // (if it hasn't passed yet).
+        const ts = new Date(schedule.at).getTime();
+        return ts > Date.now() ? schedule.at : null;
+      }
+    }
+  }
+
+  // ---- Job <-> Task mapping ------------------------------------------------
+
+  private jobToTask(job: Job): Task {
+    const nextRun = this.calculateNextRun(job.schedule) ?? undefined;
+    return {
+      id: job.id,
+      name: job.name,
+      message: job.message,
+      schedule: this.scheduleToString(job.schedule),
+      enabled: job.enabled,
+      lastRun: job.state.lastRunAt ?? undefined,
+      nextRun,
+      createdAt: job.createdAt,
+    };
+  }
+
+  private findJob(id: string): Job | undefined {
+    return this.data.jobs.find((j) => j.id === id);
+  }
+
+  // ---- CRUD ----------------------------------------------------------------
 
   createTask(
     task: Omit<Task, "id" | "createdAt" | "lastRun" | "nextRun">,
   ): Task {
-    // Validate cron expression early (except "once")
-    if (task.schedule !== "once") {
+    const schedule = this.stringToSchedule(task.schedule);
+
+    // Validate cron expression early
+    if (schedule.kind === "cron") {
       try {
-        CronExpressionParser.parse(task.schedule);
+        CronExpressionParser.parse(schedule.expr);
       } catch {
         throw new Error(
           `Invalid cron expression: "${task.schedule}". Use standard 5-field cron syntax.`,
@@ -125,22 +242,35 @@ class TaskScheduler {
       }
     }
 
-    const nextRun = this.calculateNextRun(task.schedule) ?? undefined;
     const now = new Date().toISOString();
-    const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const id = generateId("task");
 
-    this.db
-      .prepare(
-        `INSERT INTO tasks (id, name, message, schedule, enabled, next_run, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(id, task.name, task.message, task.schedule, task.enabled ? 1 : 0, nextRun ?? null, now);
+    const job: Job = {
+      id,
+      name: task.name,
+      enabled: task.enabled,
+      createdAt: now,
+      updatedAt: now,
+      schedule,
+      message: task.message,
+      state: {
+        lastRunAt: null,
+        lastStatus: null,
+        lastDurationMs: null,
+        consecutiveErrors: 0,
+      },
+      runs: [],
+    };
 
+    this.data.jobs.push(job);
+    this.writeFile();
+
+    const nextRun = this.calculateNextRun(schedule);
     if (task.enabled && nextRun && this.isRunning) {
       this.scheduleTimer(id, nextRun);
     }
 
-    return { id, ...task, createdAt: now, nextRun };
+    return this.jobToTask(job);
   }
 
   createOneTimeTask(task: {
@@ -148,16 +278,31 @@ class TaskScheduler {
     message: string;
     executeAfter: number;
   }): Task {
-    const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const id = generateId("task");
     const executeAt = new Date(Date.now() + task.executeAfter).toISOString();
     const now = new Date().toISOString();
 
-    this.db
-      .prepare(
-        `INSERT INTO tasks (id, name, message, schedule, enabled, next_run, created_at)
-         VALUES (?, ?, ?, 'once', 1, ?, ?)`,
-      )
-      .run(id, task.name, task.message, executeAt, now);
+    const schedule: ScheduleAt = { kind: "at", at: executeAt };
+
+    const job: Job = {
+      id,
+      name: task.name,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+      schedule,
+      message: task.message,
+      state: {
+        lastRunAt: null,
+        lastStatus: null,
+        lastDurationMs: null,
+        consecutiveErrors: 0,
+      },
+      runs: [],
+    };
+
+    this.data.jobs.push(job);
+    this.writeFile();
 
     if (this.isRunning) {
       this.scheduleTimer(id, executeAt);
@@ -175,126 +320,124 @@ class TaskScheduler {
   }
 
   listTasks(): Task[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, name, message, schedule, enabled,
-                last_run as lastRun, next_run as nextRun, created_at as createdAt
-         FROM tasks ORDER BY created_at DESC`,
-      )
-      .all() as any[];
-
-    return rows.map((row) => ({ ...row, enabled: row.enabled === 1 }));
+    // Return newest first, matching old SQLite ORDER BY created_at DESC
+    return [...this.data.jobs]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((j) => this.jobToTask(j));
   }
 
   getTask(id: string): Task | null {
-    const row = this.db
-      .prepare(
-        `SELECT id, name, message, schedule, enabled,
-                last_run as lastRun, next_run as nextRun, created_at as createdAt
-         FROM tasks WHERE id = ?`,
-      )
-      .get(id) as any;
-
-    if (!row) return null;
-    return { ...row, enabled: row.enabled === 1 };
+    const job = this.findJob(id);
+    return job ? this.jobToTask(job) : null;
   }
 
   updateTask(
     id: string,
     updates: Partial<Pick<Task, "name" | "message" | "schedule" | "enabled">>,
   ): Task | null {
-    const task = this.getTask(id);
-    if (!task) return null;
-
-    const merged = { ...task, ...updates };
+    const job = this.findJob(id);
+    if (!job) return null;
 
     // Validate new cron if schedule changed
-    if (updates.schedule && updates.schedule !== "once") {
-      try {
-        CronExpressionParser.parse(updates.schedule);
-      } catch {
-        throw new Error(`Invalid cron expression: "${updates.schedule}".`);
+    if (updates.schedule !== undefined) {
+      const newSchedule = this.stringToSchedule(updates.schedule);
+      if (newSchedule.kind === "cron") {
+        try {
+          CronExpressionParser.parse(newSchedule.expr);
+        } catch {
+          throw new Error(`Invalid cron expression: "${updates.schedule}".`);
+        }
       }
+      job.schedule = newSchedule;
     }
 
+    if (updates.name !== undefined) job.name = updates.name;
+    if (updates.message !== undefined) job.message = updates.message;
+    if (updates.enabled !== undefined) job.enabled = updates.enabled;
+    job.updatedAt = new Date().toISOString();
+
+    this.writeFile();
+
     this.cancelTimer(id);
-    const nextRun = this.calculateNextRun(merged.schedule);
-
-    this.db
-      .prepare(
-        `UPDATE tasks SET name = ?, message = ?, schedule = ?, enabled = ?, next_run = ?
-         WHERE id = ?`,
-      )
-      .run(merged.name, merged.message, merged.schedule, merged.enabled ? 1 : 0, nextRun, id);
-
-    if (merged.enabled && nextRun && this.isRunning) {
+    const nextRun = this.calculateNextRun(job.schedule);
+    if (job.enabled && nextRun && this.isRunning) {
       this.scheduleTimer(id, nextRun);
     }
 
-    return this.getTask(id);
+    return this.jobToTask(job);
   }
 
   deleteTask(id: string): boolean {
     this.cancelTimer(id);
-    // CASCADE will clean task_runs
-    const result = this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-    return result.changes > 0;
+    const idx = this.data.jobs.findIndex((j) => j.id === id);
+    if (idx === -1) return false;
+    this.data.jobs.splice(idx, 1);
+    this.writeFile();
+    return true;
   }
 
-  // ---- Execution ----
+  // ---- Execution -----------------------------------------------------------
 
   async runTask(id: string): Promise<TaskRun> {
-    const task = this.getTask(id);
-    if (!task) throw new Error("Task not found");
+    const job = this.findJob(id);
+    if (!job) throw new Error("Task not found");
 
-    // Guard: prevent concurrent execution of the same task
     if (this.executing.has(id)) {
       throw new Error("Task is already running");
     }
     this.executing.add(id);
 
-    const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const now = new Date().toISOString();
+    const runId = generateId("run");
+    const startedAt = new Date().toISOString();
 
-    this.db
-      .prepare(
-        "INSERT INTO task_runs (id, task_id, status, started_at) VALUES (?, ?, 'running', ?)",
-      )
-      .run(runId, id, now);
+    // Insert a running record
+    const runRecord: RunRecord = {
+      id: runId,
+      status: "running",
+      startedAt,
+    };
+    job.runs.unshift(runRecord);
+    this.pruneRuns(job);
+    this.writeFile();
 
     try {
       if (!this.executor) {
         throw new Error("Task executor not configured. Call setExecutor() first.");
       }
 
-      const response = await this.executor(task.message, id);
+      const response = await this.executor(job.message, id);
       const finishedAt = new Date().toISOString();
+      const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
 
-      if (task.schedule === "once") {
-        // One-time task: mark disabled, don't delete (keep history)
-        this.db.prepare("UPDATE tasks SET enabled = 0, last_run = ? WHERE id = ?").run(finishedAt, id);
+      // Update run record
+      runRecord.status = "success";
+      runRecord.output = response;
+      runRecord.finishedAt = finishedAt;
+
+      // Update job state
+      job.state.lastRunAt = finishedAt;
+      job.state.lastStatus = "success";
+      job.state.lastDurationMs = durationMs;
+      job.state.consecutiveErrors = 0;
+      job.updatedAt = finishedAt;
+
+      if (job.schedule.kind === "at") {
+        // One-time task: disable but keep for history
+        job.enabled = false;
       } else {
-        const nextRun = this.calculateNextRun(task.schedule);
-        this.db
-          .prepare("UPDATE tasks SET last_run = ?, next_run = ? WHERE id = ?")
-          .run(now, nextRun, id);
-
         // Re-schedule for next cycle
-        if (task.enabled && nextRun) {
+        const nextRun = this.calculateNextRun(job.schedule);
+        if (job.enabled && nextRun) {
           this.cancelTimer(id);
           this.scheduleTimer(id, nextRun);
         }
       }
 
-      this.db
-        .prepare(
-          "UPDATE task_runs SET status = 'success', output = ?, finished_at = ? WHERE id = ?",
-        )
-        .run(response, finishedAt, runId);
+      this.writeFile();
 
       // Notify (non-blocking)
       if (this.notifier) {
-        this.notifier(task.name, response).catch((e) =>
+        this.notifier(job.name, response).catch((e) =>
           console.error("[TaskScheduler] Notification failed:", e),
         );
       }
@@ -304,23 +447,31 @@ class TaskScheduler {
         taskId: id,
         status: "success",
         output: response,
-        startedAt: now,
+        startedAt,
         finishedAt,
       };
     } catch (error: any) {
       const finishedAt = new Date().toISOString();
-      this.db
-        .prepare(
-          "UPDATE task_runs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?",
-        )
-        .run(error.message, finishedAt, runId);
+      const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+
+      runRecord.status = "failed";
+      runRecord.error = error.message;
+      runRecord.finishedAt = finishedAt;
+
+      job.state.lastRunAt = finishedAt;
+      job.state.lastStatus = "failed";
+      job.state.lastDurationMs = durationMs;
+      job.state.consecutiveErrors += 1;
+      job.updatedAt = finishedAt;
+
+      this.writeFile();
 
       return {
         id: runId,
         taskId: id,
         status: "failed",
         error: error.message,
-        startedAt: now,
+        startedAt,
         finishedAt,
       };
     } finally {
@@ -329,42 +480,43 @@ class TaskScheduler {
   }
 
   getTaskRuns(taskId: string, limit = 10): TaskRun[] {
-    return this.db
-      .prepare(
-        `SELECT id, task_id as taskId, status, output, error,
-                started_at as startedAt, finished_at as finishedAt
-         FROM task_runs WHERE task_id = ?
-         ORDER BY started_at DESC LIMIT ?`,
-      )
-      .all(taskId, limit) as TaskRun[];
+    const job = this.findJob(taskId);
+    if (!job) return [];
+
+    return job.runs
+      .slice(0, limit)
+      .map((r) => ({
+        id: r.id,
+        taskId,
+        status: r.status,
+        output: r.output,
+        error: r.error,
+        startedAt: r.startedAt,
+        finishedAt: r.finishedAt,
+      }));
   }
 
-  // ---- Scheduling internals ----
+  // ---- Run-history pruning -------------------------------------------------
 
-  private calculateNextRun(schedule: string): string | null {
-    if (schedule === "once") return null;
-    try {
-      const interval = CronExpressionParser.parse(schedule);
-      return interval.next().toDate().toISOString();
-    } catch {
-      return null;
+  private pruneRuns(job: Job): void {
+    if (job.runs.length > MAX_RUNS_PER_JOB) {
+      job.runs.length = MAX_RUNS_PER_JOB;
     }
   }
 
+  // ---- Scheduling internals ------------------------------------------------
+
   private scheduleTimer(id: string, nextRun: string): void {
-    // Clear any existing timer for this task
     this.cancelTimer(id);
 
     const delay = new Date(nextRun).getTime() - Date.now();
 
     if (delay <= 0) {
-      // Already past due — execute immediately, then schedule next
       this.executeTask(id);
       return;
     }
 
     // Cap setTimeout to 24 hours (avoid Node.js 2^31 ms overflow).
-    // The poll loop will catch long-horizon tasks.
     const MAX_TIMEOUT = 24 * 60 * 60 * 1000;
     const safeDelay = Math.min(delay, MAX_TIMEOUT);
 
@@ -372,9 +524,10 @@ class TaskScheduler {
       this.timers.delete(id);
       if (safeDelay < delay) {
         // We capped the delay — re-evaluate instead of executing
-        const task = this.getTask(id);
-        if (task?.enabled && task.nextRun) {
-          this.scheduleTimer(id, task.nextRun);
+        const job = this.findJob(id);
+        if (job?.enabled) {
+          const nr = this.calculateNextRun(job.schedule);
+          if (nr) this.scheduleTimer(id, nr);
         }
       } else {
         this.executeTask(id);
@@ -400,30 +553,36 @@ class TaskScheduler {
     }
   }
 
-  // ---- Lifecycle ----
+  // ---- Lifecycle -----------------------------------------------------------
 
   start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    // Schedule all enabled tasks from DB
-    const tasks = this.listTasks().filter((t) => t.enabled);
-    for (const task of tasks) {
-      if (task.nextRun) {
-        this.scheduleTimer(task.id, task.nextRun);
-      } else if (task.schedule !== "once") {
-        // Task has no nextRun calculated — fix it
-        const nextRun = this.calculateNextRun(task.schedule);
-        if (nextRun) {
-          this.db
-            .prepare("UPDATE tasks SET next_run = ? WHERE id = ?")
-            .run(nextRun, task.id);
-          this.scheduleTimer(task.id, nextRun);
+    // Reload from disk in case of external edits
+    this.data = this.readFile();
+
+    const tasks = this.data.jobs.filter((j) => j.enabled);
+    let needsWrite = false;
+
+    for (const job of tasks) {
+      const nextRun = this.calculateNextRun(job.schedule);
+      if (nextRun) {
+        this.scheduleTimer(job.id, nextRun);
+      } else if (job.schedule.kind !== "at") {
+        // Shouldn't happen, but be defensive
+        const nr = this.calculateNextRun(job.schedule);
+        if (nr) {
+          this.scheduleTimer(job.id, nr);
         }
       }
     }
 
-    // Safety-net poll: every 60s, check for missed tasks
+    if (needsWrite) {
+      this.writeFile();
+    }
+
+    // Safety-net poll: every 60s check for missed tasks
     this.pollTimer = setInterval(() => {
       this.pollMissedTasks();
     }, 60_000);
@@ -450,17 +609,28 @@ class TaskScheduler {
    */
   private pollMissedTasks(): void {
     const now = Date.now();
-    const tasks = this.listTasks().filter((t) => t.enabled && t.schedule !== "once");
+    const enabledJobs = this.data.jobs.filter(
+      (j) => j.enabled && j.schedule.kind !== "at",
+    );
 
-    for (const task of tasks) {
-      if (!task.nextRun) continue;
-      const nextRunMs = new Date(task.nextRun).getTime();
-      if (nextRunMs <= now && !this.timers.has(task.id) && !this.executing.has(task.id)) {
-        console.log(`[TaskScheduler] Missed task detected: ${task.id}, executing now`);
-        this.executeTask(task.id);
+    for (const job of enabledJobs) {
+      const nextRun = this.calculateNextRun(job.schedule);
+      if (!nextRun) continue;
+      const nextRunMs = new Date(nextRun).getTime();
+      if (
+        nextRunMs <= now &&
+        !this.timers.has(job.id) &&
+        !this.executing.has(job.id)
+      ) {
+        console.log(`[TaskScheduler] Missed task detected: ${job.id}, executing now`);
+        this.executeTask(job.id);
       }
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Singleton export (matches old API surface)
+// ---------------------------------------------------------------------------
 
 export const taskScheduler = new TaskScheduler();
