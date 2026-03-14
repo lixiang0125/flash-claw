@@ -8,7 +8,7 @@
 - **Web 框架**: Hono
 - **AI**: OpenAI SDK (DashScope 阿里云百炼) + Qwen Function Calling
 - **前端**: React 19 + Vite
-- **数据库**: SQLite (bun:sqlite) + mem0 (本地向量搜索)
+- **数据库**: SQLite (bun:sqlite) + mem0ai v2.3.0 OSS (本地向量搜索, better-sqlite3→bun:sqlite shim)
 - **DI 容器**: 自研 IoC 容器 (Singleton/Transient/Scoped 生命周期)
 
 ## 功能特性
@@ -42,10 +42,19 @@ cp .env.example .env
 修改 `.env` 中的配置:
 
 ```bash
+# 主 LLM (coding 端点)
 OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
 MODEL=qwen3.5-plus
+
+# mem0 记忆系统 (需要通用 DashScope 端点，支持 embedding)
+DASHSCOPE_API_KEY=sk-your-general-dashscope-key
+MEM0_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MEM0_LLM_MODEL=qwen-plus
+MEM0_EMBEDDING_MODEL=text-embedding-v3
 ```
+
+> **注意**: `coding.dashscope.aliyuncs.com` 不支持 embedding 模型。mem0 需要单独配置 `MEM0_BASE_URL` 指向通用端点。
 
 ### 运行
 
@@ -102,7 +111,7 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 |------|------|----------|----------|
 | T0 | WorkingMemory | 内存 | 当前会话 |
 | T1 | ShortTermMemory | SQLite | 30分钟自动过期 |
-| T2 | mem0 Memory | SQLite 向量库 (mem0) | 永久 |
+| T2 | mem0 Memory | SQLite 向量库 (`data/mem0_vectors.db`) | 永久 |
 | T3 | MarkdownMemory | Markdown 文件 | 永久 |
 
 **核心设计理念**：
@@ -111,6 +120,7 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 - **LLM 自主判断**：不通过关键词判断什么该记住，由 LLM 决定（使用 mem0 的 LLM 抽取能力）
 - **优雅降级**：向量搜索失败 → 用户仍可直接读取 Markdown 文件
 - **本地优先**：使用 mem0 OSS 本地模式，数据完全存储在本地 SQLite
+- **Bun 兼容**：mem0ai 内部依赖 `better-sqlite3` 原生 addon，Bun 不支持加载。项目通过 `shims/better-sqlite3-bun.js` 透明映射到 `bun:sqlite`，postinstall 脚本自动生效
 
 **5 种记忆写入触发路径**（参考 OpenClaw）：
 
@@ -128,13 +138,20 @@ const chatEngine = container.resolve(CHAT_ENGINE);
 - **MMR 重排序**：基于内容相似度保证结果多样性，避免重复
 - **时间衰减**：新近记忆自然排名更高（半衰期可配置）
 
-**工作区结构**：
+**数据目录结构**（`data/` 整体 gitignore，不上传远端）：
 ```
-data/workspace/
-├── MEMORY.md              # 长期策划记忆（人名、偏好、决策）
-└── memory/
-    ├── 2026-03-04.md     # 今日对话日志
-    └── 2026-03-03.md     # 昨日对话日志
+data/
+├── FlashClaw.db           # 主数据库 (会话、任务等)
+├── mem0_vectors.db        # mem0 向量存储
+├── mem0_history.db        # mem0 记忆变更历史
+├── profiles.db            # 用户画像
+├── heartbeat.db           # 心跳记录
+├── tasks.db               # 任务调度
+└── workspace/
+    ├── MEMORY.md          # 长期策划记忆（人名、偏好、决策）
+    └── memory/
+        ├── 2026-03-14.md  # 今日对话日志
+        └── 2026-03-13.md  # 昨日对话日志
 ```
 
 **配置选项**：

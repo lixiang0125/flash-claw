@@ -1,5 +1,65 @@
 # Changelog
 
+## 2026-03-14
+
+### mem0 Bun 运行时兼容性修复 & 数据目录整理
+
+**核心问题**: mem0ai v2.3.0 内部使用 `better-sqlite3` 原生 addon，而 Bun 运行时不支持加载该 addon，导致 `Memory` 实例化时抛出 `ERR_DLOPEN_FAILED` 错误。
+
+**解决方案**: 创建 `better-sqlite3` → `bun:sqlite` 透明 shim，通过 postinstall 脚本自动替换原生模块入口。
+
+**变更文件**:
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `shims/better-sqlite3-bun.js` | 新增 | bun:sqlite shim — 包装 Database/Statement/SqliteError |
+| `scripts/patch-better-sqlite3.js` | 新增 | postinstall 脚本，自动替换 node_modules 中的 addon |
+| `src/memory/mem0-factory.ts` | 修改 | 新增 `vectorStoreDbPath` 选项，所有 DB 路径指向 `data/` |
+| `src/memory/mem0-embedder-patch.ts` | 修改 | 增强 instanceof 检查和幂等性 |
+| `src/memory/mem0-memory-manager.ts` | 修改 | 清理无用 import，增强错误处理 |
+| `package.json` | 修改 | mem0ai 升级到 ^2.3.0，添加 postinstall hook |
+| `.gitignore` | 修改 | 添加 `*.db` / `*.db-shm` / `*.db-wal` 规则 |
+| `.env.example` | 修改 | 添加 mem0 专用配置段 (MEM0_BASE_URL 等) |
+
+**Shim 技术细节**:
+
+- `Database` 构造函数：映射 better-sqlite3 选项到 bun:sqlite 选项
+- `Statement` 包装器：`run()` / `get()` / `all()` 直接代理
+- `pragma()` 方法：通过 `PREPARE 'PRAGMA ...'` 模拟（mem0 未使用）
+- `SqliteError`：自定义错误类，保持 `.code` 属性兼容
+- BLOB 处理：bun:sqlite 返回 `Uint8Array`，与 `Float32Array` 重建兼容
+
+**数据目录整理**:
+
+- mem0 vector store DB: `./data/mem0_vectors.db`（原先在项目根目录 `vector_store.db`）
+- mem0 history DB: `./data/mem0_history.db`（原先 `memory.db`）
+- 根目录 `memory.db` / `vector_store.db` 已从 git 移除
+- `data/` 目录整体 gitignore，仅初始化逻辑上传远端
+
+**验证结果**:
+
+- `require("better-sqlite3")` → bun:sqlite Database ✅
+- `db.exec()` / `db.prepare()` / `stmt.run()` / `stmt.all()` / `stmt.get()` ✅
+- `db.transaction()` 批量插入 ✅
+- BLOB (Float32Array ↔ Buffer) 读写往返 ✅
+- `new Memory({...})` 实例化成功 ✅
+- TypeScript 编译零错误 (`src/memory/` 目录) ✅
+
+**环境配置说明**:
+
+mem0 使用通用 DashScope 端点（非 coding 端点），需要在 `.env` 中配置:
+
+```
+DASHSCOPE_API_KEY=sk-your-general-dashscope-key
+MEM0_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MEM0_LLM_MODEL=qwen-plus
+MEM0_EMBEDDING_MODEL=text-embedding-v3
+```
+
+> 注意: `coding.dashscope.aliyuncs.com` 端点不支持 embedding 模型，mem0 的 baseURL 不应 fallback 到 `OPENAI_BASE_URL`。
+
+---
+
 ## 2026-03-04
 
 **Changed files:**

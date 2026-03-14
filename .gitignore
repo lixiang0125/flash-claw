@@ -30,6 +30,12 @@ MEMORY.md
 USER.md
 SOUL.md
 
+# SQLite database files (runtime data — local only)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
 # caches
 .eslintcache
 .cache

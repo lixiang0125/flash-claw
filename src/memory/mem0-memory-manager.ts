@@ -4,8 +4,6 @@ import type { WorkingMemory, ConversationMessage } from "./working-memory";
 import type { ShortTermMemory } from "./short-term-memory";
 import type { MarkdownMemory } from "./markdown-memory";
 import type { UserProfileService, UserProfile } from "./user-profile";
-import * as fs from "fs/promises";
-import * as path from "path";
 
 export interface MemoryEntry {
   id: string;
@@ -74,6 +72,17 @@ const DEFAULT_CONFIG: Mem0MemoryManagerConfig = {
   weights: { semantic: 0.6, recency: 0.3, importance: 0.1 },
 };
 
+/**
+ * Memory manager backed by mem0ai/oss (v2.3.0+).
+ *
+ * Orchestrates three memory tiers:
+ *   1. WorkingMemory  – in-process, per-session message buffer
+ *   2. ShortTermMemory – SQLite-backed session/message store
+ *   3. mem0 (LTM)     – vector-search long-term memory with LLM extraction
+ *
+ * Also integrates MarkdownMemory for human-readable daily logs
+ * and UserProfileService for per-user preferences.
+ */
 export class Mem0MemoryManager implements IMemoryManager {
   private config: Mem0MemoryManagerConfig;
   private logger: Logger;
@@ -101,9 +110,14 @@ export class Mem0MemoryManager implements IMemoryManager {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  // ---------------------------------------------------------------------------
+  // Store
+  // ---------------------------------------------------------------------------
+
   async store(
     entry: Omit<MemoryEntry, "id" | "accessCount" | "lastAccessedAt">,
   ): Promise<string> {
+    // Always persist to short-term memory for session replay.
     if (entry.sessionId) {
       this.shortTermMemory.saveMessage(entry.sessionId, {
         role: "user",
@@ -112,24 +126,35 @@ export class Mem0MemoryManager implements IMemoryManager {
       });
     }
 
+    // Only promote to long-term memory if importance exceeds threshold.
     if (entry.importance >= 0.3) {
-      const result = await this.mem0.add(entry.content, {
-        userId: entry.userId,
-        agentId: "flash-claw",
-        runId: entry.sessionId || "",
-        metadata: { type: entry.type, importance: entry.importance, ...entry.metadata },
-      });
-      const results = (result as { results?: Array<{ id: string }> })?.results || [];
-      return results[0]?.id || crypto.randomUUID();
+      try {
+        const result = await this.mem0.add(entry.content, {
+          userId: entry.userId,
+          agentId: "flash-claw",
+          runId: entry.sessionId || "",
+          metadata: { type: entry.type, importance: entry.importance, ...entry.metadata },
+        });
+        const results = (result as { results?: Array<{ id: string }> })?.results || [];
+        return results[0]?.id || crypto.randomUUID();
+      } catch (err) {
+        this.logger.error("mem0 store (single) failed", { err });
+        return crypto.randomUUID();
+      }
     }
 
     return crypto.randomUUID();
   }
 
+  // ---------------------------------------------------------------------------
+  // Recall (hybrid: working memory + mem0 vector search)
+  // ---------------------------------------------------------------------------
+
   async recall(query: MemoryQuery): Promise<MemorySearchResult[]> {
     const results: MemorySearchResult[] = [];
     const limit = query.limit || this.config.defaultLimit;
 
+    // Tier 1: Working memory (current session context).
     if (query.sessionId) {
       const recent = this.workingMemory.getRecent(query.sessionId, 5);
       for (const msg of recent) {
@@ -152,14 +177,17 @@ export class Mem0MemoryManager implements IMemoryManager {
       }
     }
 
+    // Tier 3: mem0 long-term vector search.
     try {
-    const mem0Results = await this.mem0.search(query.text, {
-      userId: query.userId,
-      agentId: "flash-claw",
-      limit: limit * this.config.candidateMultiplier,
-    });
+      const mem0Results = await this.mem0.search(query.text, {
+        userId: query.userId,
+        agentId: "flash-claw",
+        limit: limit * this.config.candidateMultiplier,
+      });
 
-    const items = (mem0Results as unknown as { results?: Array<Record<string, unknown>> })?.results || [];
+      const items =
+        (mem0Results as unknown as { results?: Array<Record<string, unknown>> })
+          ?.results || [];
       for (const item of items) {
         results.push(this.toSearchResult(item, query));
       }
@@ -170,12 +198,17 @@ export class Mem0MemoryManager implements IMemoryManager {
     return this.dedupeAndSort(results, limit);
   }
 
+  // ---------------------------------------------------------------------------
+  // Store interaction (full chat turn → all tiers)
+  // ---------------------------------------------------------------------------
+
   async storeInteraction(msg: IncomingMessage, response: string): Promise<void> {
     const userId = msg.sender.id;
     const sessionId = msg.conversationId;
     const userText = msg.content.text ?? "";
     const now = Date.now();
 
+    // Tier 1: Working memory.
     this.workingMemory.append(sessionId, {
       role: "user",
       content: userText,
@@ -188,6 +221,7 @@ export class Mem0MemoryManager implements IMemoryManager {
     });
     await this.workingMemory.tryFlush(sessionId);
 
+    // Tier 2: Short-term memory.
     this.shortTermMemory.upsertSession(sessionId, userId, msg.platform);
     this.shortTermMemory.saveMessage(sessionId, {
       role: "user",
@@ -200,12 +234,18 @@ export class Mem0MemoryManager implements IMemoryManager {
       timestamp: now,
     });
 
+    // Tier 3: mem0 long-term (async, non-blocking).
     this.storeTomem0(userText, response, userId, sessionId).catch((err) =>
       this.logger.error("mem0 store failed", { err }),
     );
 
+    // Side-channel: Markdown daily log.
     this.appendMarkdownLog(userText, sessionId).catch(() => {});
   }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
 
   private async storeTomem0(
     userMessage: string,
@@ -225,7 +265,8 @@ export class Mem0MemoryManager implements IMemoryManager {
       metadata: { source: "chat", timestamp: Date.now() },
     });
 
-    const results = (result as unknown as { results?: Array<{ event: string }> })?.results || [];
+    const results =
+      (result as unknown as { results?: Array<{ event: string }> })?.results || [];
     const stats = {
       added: results.filter((r) => r.event === "ADD").length,
       updated: results.filter((r) => r.event === "UPDATE").length,
@@ -256,7 +297,8 @@ export class Mem0MemoryManager implements IMemoryManager {
 
     const semanticScore = (item.score as number) ?? 0;
     const recencyScore = Math.exp((-0.693 * ageMs) / halfLifeMs);
-    const importanceScore = ((item.metadata as Record<string, unknown>)?.importance as number) ?? 0.5;
+    const importanceScore =
+      ((item.metadata as Record<string, unknown>)?.importance as number) ?? 0.5;
 
     const { weights } = this.config;
     const relevanceScore =
@@ -268,9 +310,12 @@ export class Mem0MemoryManager implements IMemoryManager {
       entry: {
         id: (item.id as string) || "",
         content: (item.memory as string) || "",
-        type: ((item.metadata as Record<string, unknown>)?.type as MemoryEntry["type"]) || "fact",
+        type:
+          ((item.metadata as Record<string, unknown>)?.type as MemoryEntry["type"]) ||
+          "fact",
         userId: (item.user_id as string) || query.userId,
-        sessionId: ((item.metadata as Record<string, unknown>)?.session_id as string),
+        sessionId: (item.metadata as Record<string, unknown>)
+          ?.session_id as string,
         timestamp: createdAt,
         importance: importanceScore,
         accessCount: 0,
@@ -301,6 +346,10 @@ export class Mem0MemoryManager implements IMemoryManager {
     return deduped.slice(0, limit);
   }
 
+  // ---------------------------------------------------------------------------
+  // Markdown session export
+  // ---------------------------------------------------------------------------
+
   async saveSessionToMarkdown(sessionId: string): Promise<void> {
     if (!this.markdownMemory) return;
 
@@ -323,6 +372,10 @@ export class Mem0MemoryManager implements IMemoryManager {
       );
   }
 
+  // ---------------------------------------------------------------------------
+  // User profile
+  // ---------------------------------------------------------------------------
+
   async getUserProfile(userId: string): Promise<UserProfile> {
     return this.userProfile.getProfile(userId);
   }
@@ -331,9 +384,17 @@ export class Mem0MemoryManager implements IMemoryManager {
     return this.userProfile.updateProfile(userId, updates);
   }
 
+  // ---------------------------------------------------------------------------
+  // Maintenance
+  // ---------------------------------------------------------------------------
+
   async cleanup(maxAge?: number): Promise<number> {
     return this.shortTermMemory.cleanup();
   }
+
+  // ---------------------------------------------------------------------------
+  // Direct mem0 operations (for admin / debug)
+  // ---------------------------------------------------------------------------
 
   async getMemory(memoryId: string) {
     return this.mem0.get(memoryId);
