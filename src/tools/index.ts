@@ -2,7 +2,7 @@
  * @deprecated 此文件为旧工具系统，新工具应在 src/tools/builtin/ 下创建。
  * 此文件中的工具通过 legacy-adapter.ts 适配后注册到新 FlashClawToolDefinition 系统。
  * 当前仅作为适配桥梁保留——新系统中已有原生实现的工具（bash, read_file 等）
- * 已由 builtin/*.ts 替代，此处的同名实现不再被直接调用。
+ * 已由 builtin/ 目录下的工具文件 替代，此处的同名实现不再被直接调用。
  *
  * 迁移计划：逐步将 FeishuDoc/FeishuDrive/FeishuPerm/FeishuWiki/GetProfile/
  * UpdateProfile/SubAgent 等工具迁移为 builtin 原生实现，届时删除此文件。

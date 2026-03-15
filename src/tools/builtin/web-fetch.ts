@@ -1,11 +1,30 @@
+/**
+ * @module web-fetch
+ * @description 网页内容获取工具。
+ *
+ * 获取指定 URL 的网页内容，自动将 HTML 转换为 Markdown 格式。
+ * 支持使用 Readability 提取主体内容，可选使用 Playwright 渲染
+ * JavaScript 动态页面。内置 SSRF 防护和响应缓存机制。
+ * 适合阅读文档页面、博客文章、API 文档等。
+ */
 import { z, ZodType } from "zod";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import type { FlashClawToolDefinition, ToolExecutionContext } from "../types";
 import { defaultSSRFProtection } from "../../infra/net/ssrf.js";
 
+/** 默认最大内容长度：150000 字符 */
 const MAX_CONTENT_LENGTH = 150_000;
 
+/**
+ * 网页获取工具的输入参数 Schema。
+ *
+ * 使用 Zod 定义输入校验规则：
+ * - url: 要获取的目标 URL
+ * - extractMainContent: 是否使用 Readability 提取主要内容，默认 true
+ * - maxLength: 最大返回字符数，范围 1000-200000，默认 150000
+ * - usePlaywright: 是否使用 Playwright 渲染 JS 动态页面，默认 false
+ */
 const WebFetchInput: ZodType<{
   url: string;
   extractMainContent?: boolean;
@@ -18,6 +37,18 @@ const WebFetchInput: ZodType<{
   usePlaywright: z.boolean().default(false).describe("是否使用 Playwright 渲染 JS (对 SPA 有效)"),
 });
 
+/**
+ * 网页获取工具的输出结果接口。
+ *
+ * @property success - 请求是否成功
+ * @property url - 请求的 URL
+ * @property status - HTTP 响应状态码
+ * @property title - 页面标题
+ * @property content - 提取/转换后的页面内容
+ * @property contentLength - 内容的字符长度
+ * @property error - 错误信息（失败时）
+ * @property usedPlaywright - 是否使用了 Playwright 渲染
+ */
 interface WebFetchOutput {
   success: boolean;
   url: string;
@@ -29,9 +60,21 @@ interface WebFetchOutput {
   usedPlaywright?: boolean;
 }
 
+/** 请求结果缓存，key 为 URL，value 包含内容和时间戳 */
 const fetchCache = new Map<string, { content: string; timestamp: number }>();
+/** 缓存过期时间：5 分钟 */
 const CACHE_TTL = 5 * 60 * 1000;
 
+/**
+ * 使用 Playwright 无头浏览器获取页面内容。
+ *
+ * 启动 Chromium 浏览器渲染页面，等待网络请求完成后提取内容。
+ * 适用于需要 JavaScript 渲染的单页应用（SPA）。
+ *
+ * @param url - 要获取的页面 URL
+ * @param timeout - 页面加载超时时间（毫秒），默认 30000
+ * @returns 包含页面 HTML 内容和标题的对象
+ */
 async function fetchWithPlaywright(url: string, timeout = 30000): Promise<{ content: string; title: string }> {
   const { chromium } = await import("playwright");
 
@@ -53,6 +96,15 @@ async function fetchWithPlaywright(url: string, timeout = 30000): Promise<{ cont
   }
 }
 
+/**
+ * 将 HTML 内容转换为 Markdown 格式。
+ *
+ * 递归遍历 DOM 节点，将常见 HTML 标签转换为对应的 Markdown 语法。
+ * 支持标题、段落、列表、引用、代码块、链接、加粗、斜体等。
+ *
+ * @param html - 原始 HTML 字符串
+ * @returns 转换后的 Markdown 文本
+ */
 function htmlToMarkdown(html: string): string {
   const dom = new JSDOM(html);
   const doc = dom.window.document;
@@ -110,6 +162,17 @@ function htmlToMarkdown(html: string): string {
   return md.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/**
+ * 网页获取工具定义。
+ *
+ * 抓取网页内容并转换为 Markdown，支持主体内容提取和 Playwright 渲染。
+ * 内置 SSRF 防护和 5 分钟响应缓存。
+ * 无需用户审批即可执行。
+ *
+ * @example
+ * // 获取文档页面
+ * { url: "https://docs.python.org/3/tutorial/classes.html", maxLength: 100000 }
+ */
 export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetchOutput> = {
   name: "web_fetch",
   description:
@@ -125,12 +188,29 @@ export const webFetchTool: FlashClawToolDefinition<typeof WebFetchInput, WebFetc
   inputExamples: [
     { input: { url: "https://docs.python.org/3/tutorial/classes.html", maxLength: 100000 } },
   ],
+  /**
+   * 将输出转换为模型可读的文本格式。
+   *
+   * 成功时返回内容文本，失败时返回错误信息。
+   *
+   * @param output - 网页获取的原始输出
+   * @returns 格式化后的文本字符串
+   */
   toModelOutput: (output: WebFetchOutput): string => {
     if (!output.success) {
       return `Error: ${output.error}`;
     }
     return output.content || `No content extracted from ${output.url}`;
   },
+  /**
+   * 执行网页内容获取。
+   *
+   * 流程：SSRF 检查 -> 缓存查找 -> 发起请求 -> 内容提取 -> 格式转换。
+   *
+   * @param input - 输入参数，包含 URL 和各种获取选项
+   * @param _context - 工具执行上下文（本工具未使用）
+   * @returns 包含页面内容和元信息的结果对象
+   */
   execute: async (input: { url: string; extractMainContent?: boolean; maxLength?: number; usePlaywright?: boolean }, _context: ToolExecutionContext): Promise<WebFetchOutput> => {
     const ssrfCheck = await defaultSSRFProtection.checkWithDNS(input.url);
     if (!ssrfCheck.allowed) {

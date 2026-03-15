@@ -1,5 +1,30 @@
 # Changelog
 
+## 2025-03-15 (17)
+
+### 全量 API 文档补充（JSDoc/TSDoc 中文注释）
+
+为项目全部公开 API 添加完整的中文 JSDoc 文档注释，覆盖 19 个文件、+2343 行纯文档：
+
+**核心模块**
+- `container/tokens.ts`: 30+ 接口 + 20 个服务 Token 常量，全部添加 @interface/@const 注释（+373 行）
+- `security/types.ts`: 5 个安全接口 + DEFAULT_SECURITY_POLICY 常量（+75 行）
+- `security/security-layer.ts`: SecurityLayer 类及 8 个公开方法（+167 行）
+
+**工具系统**
+- `tool-registry.ts`: ToolRegistry 类，10 个方法全部文档化（+137 行）
+- `tool-executor.ts`: ToolExecutor 类，execute/executeBatch 等（+117 行）
+- `sandbox-manager.ts`: ISandboxManager 接口 + SandboxManager 实现，30 个 JSDoc 块（+235 行）
+- 8 个内置工具（bash/edit-file/glob/grep/read-file/web-fetch/web-search/write-file）：每个均添加 @module + 输入/输出接口 + @example（合计 +471 行）
+
+**记忆系统**
+- `short-term-memory.ts`: 完整文档化，含四级记忆体系说明（+219 行）
+- `working-memory.ts`: 补充缺失的方法文档（+149 行）
+- `markdown-memory.ts`: 英文注释替换为中文 + 补充缺失部分（+161 行）
+- `mem0-memory-manager.ts`: 全部接口和方法文档化（+217 行）
+
+**验证**: 213 pass / 4 skip / 1 pre-existing fail，零回归
+
 ## 2025-03-15 (15)
 
 ### @types/dockerode + 测试覆盖率 Codecov + feishu.test.ts 零网络策略
