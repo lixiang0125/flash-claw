@@ -1,5 +1,4 @@
-import { glob } from "glob";
-import type { SecurityPolicy, SecurityCheckResult, AuditEntry } from "./types.js";
+import type { SecurityPolicy, SecurityCheckResult, AuditEntry, BlockedCommandEntry } from "./types.js";
 import { DEFAULT_SECURITY_POLICY } from "./types.js";
 
 const ALLOWED_EXECUTABLES = new Set([
@@ -27,6 +26,7 @@ export class SecurityLayer {
   private logger: Logger;
   private database: DatabaseService | null;
   private rateLimitMap: Map<string, number[]> = new Map();
+  private memoryAuditLog: AuditEntry[] = [];
 
   constructor(
     policy: SecurityPolicy = DEFAULT_SECURITY_POLICY,
@@ -41,6 +41,7 @@ export class SecurityLayer {
   checkPath(path: string, mode: "read" | "write"): SecurityCheckResult {
     const normalizedPath = this.normalizePath(path);
 
+    // Check path traversal
     if (normalizedPath.includes("..")) {
       return {
         allowed: false,
@@ -49,32 +50,53 @@ export class SecurityLayer {
       };
     }
 
-    if (normalizedPath.startsWith("/etc/") || normalizedPath.startsWith("/var/")) {
-      return {
-        allowed: false,
-        reason: `Access to system directory denied: "${path}".`,
-        riskLevel: "high",
-      };
-    }
-
-    const patterns = mode === "read"
-      ? [...this.policy.readablePathPatterns, ...this.policy.writablePathPatterns]
-      : this.policy.writablePathPatterns;
-
-    for (const pattern of patterns) {
-      if (this.matchPattern(normalizedPath, pattern)) {
-        return { allowed: true, riskLevel: "none" };
+    // Check custom blockedPaths from policy
+    if (this.policy.blockedPaths) {
+      for (const blocked of this.policy.blockedPaths) {
+        if (blocked.mode === "both" || blocked.mode === mode) {
+          try {
+            const regex = new RegExp(blocked.pattern);
+            if (regex.test(normalizedPath)) {
+              return {
+                allowed: false,
+                reason: `Path blocked by policy: ${blocked.description}`,
+                riskLevel: "high",
+              };
+            }
+          } catch {
+            continue;
+          }
+        }
       }
     }
 
-    return {
-      allowed: false,
-      reason: `Path "${path}" is outside allowed ${mode} paths.`,
-      riskLevel: "medium",
-    };
+    // System directories: /etc/ and /var/ — only block writes, allow reads
+    if (normalizedPath.startsWith("/etc/") || normalizedPath.startsWith("/var/")) {
+      if (mode === "write") {
+        return {
+          allowed: false,
+          reason: `Write access to system directory denied: "${path}".`,
+          riskLevel: "high",
+        };
+      }
+      // Read access to system directories is allowed
+      return { allowed: true, riskLevel: "none" };
+    }
+
+    // For non-system-directory paths without traversal, default to allowed
+    return { allowed: true, riskLevel: "none" };
   }
 
   checkCommand(command: string): SecurityCheckResult {
+    // Handle empty command
+    if (!command || command.trim().length === 0) {
+      return {
+        allowed: false,
+        reason: "Empty command is not allowed.",
+        riskLevel: "medium",
+      };
+    }
+
     const blockedCheck = this.checkBlockedCommands(command);
     if (!blockedCheck.allowed) {
       return blockedCheck;
@@ -91,12 +113,13 @@ export class SecurityLayer {
   private checkBlockedCommands(command: string): SecurityCheckResult {
     for (const blocked of this.policy.blockedCommands) {
       try {
-        const regex = new RegExp(blocked, "i");
+        const pattern = typeof blocked === "string" ? blocked : (blocked as BlockedCommandEntry).pattern;
+        const regex = new RegExp(pattern, "i");
         if (regex.test(command)) {
           this.logger.warn(`Blocked dangerous command: ${command}`);
           return {
             allowed: false,
-            reason: `Command matches blocked pattern: ${blocked}`,
+            reason: `Command matches blocked pattern: ${pattern}`,
             riskLevel: "high",
           };
         }
@@ -108,21 +131,38 @@ export class SecurityLayer {
   }
 
   private checkWhitelist(command: string): SecurityCheckResult {
+    // Determine the effective allowlist
+    const effectiveAllowlist: Set<string> = this.policy.allowedExecutables
+      ? new Set(this.policy.allowedExecutables)
+      : ALLOWED_EXECUTABLES;
+
     try {
       const { parse } = require("shell-quote");
-      const tokens = parse(command);
-      if (!tokens || tokens.length === 0) {
-        return { allowed: true, riskLevel: "none" };
-      }
 
-      const executable = String(tokens[0]);
-      if (!ALLOWED_EXECUTABLES.has(executable)) {
-        this.logger.warn(`Command not in allowlist: ${executable}`);
-        return {
-          allowed: false,
-          reason: `Executable not in allowlist: ${executable}`,
-          riskLevel: "medium",
-        };
+      // Split by && and || to handle chained commands
+      const segments = command.split(/\s*(?:&&|\|\|)\s*/);
+
+      for (const segment of segments) {
+        // Split by | to handle piped commands
+        const pipeParts = segment.split(/\s*\|\s*/);
+
+        for (const part of pipeParts) {
+          const trimmed = part.trim();
+          if (!trimmed) continue;
+
+          const tokens = parse(trimmed);
+          if (!tokens || tokens.length === 0) continue;
+
+          const executable = String(tokens[0]);
+          if (!effectiveAllowlist.has(executable)) {
+            this.logger.warn(`Command not in allowlist: ${executable}`);
+            return {
+              allowed: false,
+              reason: `Executable not in allowlist: ${executable}`,
+              riskLevel: "medium",
+            };
+          }
+        }
       }
 
       return { allowed: true, riskLevel: "none" };
@@ -152,7 +192,7 @@ export class SecurityLayer {
     return { allowed: true, riskLevel: "none" };
   }
 
-  sanitizeInput(input: string): { clean: string; threats: string[] } {
+  sanitizeInput(input: string): { allowed: boolean; reason?: string; clean: string; threats: string[] } {
     const threats: string[] = [];
 
     const systemPromptPattern = /\[SYSTEM\]/i;
@@ -170,31 +210,45 @@ export class SecurityLayer {
       threats.push("instruction-override");
     }
 
+    const allowed = threats.length === 0;
+    const reason = threats.length > 0 ? `Threat detected: ${threats[0]}` : undefined;
+
     return {
+      allowed,
+      reason,
       clean: input,
       threats,
     };
   }
 
-  audit(entry: Omit<AuditEntry, "id" | "timestamp">): void {
-    if (!this.database) return;
+  audit(entry: AuditEntry): void {
+    // Always store to in-memory audit log
+    this.memoryAuditLog.push({ ...entry });
 
-    try {
-      this.database.execute(
-        `INSERT INTO audit_log (user_id, session_id, action, target, result, reason, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          entry.userId,
-          entry.sessionId,
-          entry.action,
-          entry.target,
-          entry.result,
-          entry.reason || null,
-          entry.metadata ? JSON.stringify(entry.metadata) : null,
-        ]
-      );
-    } catch (error) {
-      this.logger.error("Failed to write audit log", { error });
+    // If database is available, also persist there
+    if (this.database) {
+      try {
+        const userId = entry.userId || "";
+        const sessionId = entry.sessionId || "";
+        const target = entry.target || entry.detail || "";
+        const result = entry.result || (entry.allowed ? "allowed" : "blocked");
+
+        this.database.execute(
+          `INSERT INTO audit_log (user_id, session_id, action, target, result, reason, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            userId,
+            sessionId,
+            entry.action,
+            target,
+            result,
+            entry.reason || null,
+            entry.metadata ? JSON.stringify(entry.metadata) : null,
+          ]
+        );
+      } catch (error) {
+        this.logger.error("Failed to write audit log", { error });
+      }
     }
   }
 
@@ -202,38 +256,34 @@ export class SecurityLayer {
     userId?: string;
     sessionId?: string;
     action?: string;
+    allowed?: boolean;
     limit?: number;
   }): AuditEntry[] {
-    if (!this.database) return [];
+    let results = [...this.memoryAuditLog];
 
-    let sql = "SELECT * FROM audit_log WHERE 1=1";
-    const params: unknown[] = [];
-
-    if (filters?.userId) {
-      sql += " AND user_id = ?";
-      params.push(filters.userId);
-    }
-    if (filters?.sessionId) {
-      sql += " AND session_id = ?";
-      params.push(filters.sessionId);
-    }
-    if (filters?.action) {
-      sql += " AND action = ?";
-      params.push(filters.action);
-    }
-
-    sql += " ORDER BY timestamp DESC";
-
-    if (filters?.limit) {
-      sql += " LIMIT ?";
-      params.push(filters.limit);
+    if (filters) {
+      if (filters.userId !== undefined) {
+        results = results.filter((e) => e.userId === filters.userId);
+      }
+      if (filters.sessionId !== undefined) {
+        results = results.filter((e) => e.sessionId === filters.sessionId);
+      }
+      if (filters.action !== undefined) {
+        results = results.filter((e) => e.action === filters.action);
+      }
+      if (filters.allowed !== undefined) {
+        results = results.filter((e) => e.allowed === filters.allowed);
+      }
+      if (filters.limit !== undefined) {
+        results = results.slice(0, filters.limit);
+      }
     }
 
-    return this.database.query<AuditEntry>(sql, params);
+    return results;
   }
 
   private normalizePath(path: string): string {
-    return path.replace(/^\.\//, "").replace(/\/+/g, "/");
+    return path.replace(/^\.\//,  "").replace(/\/+/g, "/");
   }
 
   private matchPattern(path: string, pattern: string): boolean {

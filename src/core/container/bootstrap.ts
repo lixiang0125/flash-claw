@@ -30,7 +30,7 @@ import {
   type LLMService,
   type AgentCore,
   type EventBus,
-  type SandboxManager,
+  type SandboxManager as ISandboxManagerToken,
   type ToolRegistry as IToolRegistry,
   type ToolExecutor as IToolExecutor,
   type IMemoryManager,
@@ -47,6 +47,8 @@ import { TypedEventBus } from "./event-bus";
 import { createSandboxManager } from "../../tools/sandbox";
 import { ToolRegistry } from "../../tools/tool-registry";
 import { ToolExecutor } from "../../tools/tool-executor";
+import type { ISandboxManager } from "../../tools/sandbox/sandbox-manager";
+import type { FlashClawToolDefinition } from "../../tools/types";
 import { readFileTool } from "../../tools/builtin/read-file";
 import { writeFileTool } from "../../tools/builtin/write-file";
 import { editFileTool } from "../../tools/builtin/edit-file";
@@ -54,17 +56,21 @@ import { bashTool } from "../../tools/builtin/bash";
 import { globTool } from "../../tools/builtin/glob";
 import { grepTool } from "../../tools/builtin/grep";
 import { webSearchTool } from "../../tools/builtin/web-search";
-import { chatEngine } from "../../chat/engine";
-import { feishuBot } from "../../integrations/feishu";
-import { taskScheduler } from "../../tasks";
-import { heartbeatSystem } from "../../heartbeat";
-import { subAgentSystem } from "../../subagents";
+import { webFetchTool } from "../../tools/builtin/web-fetch";
+import { adaptLegacyTools } from "../../tools/legacy-adapter";
+import { ChatEngine } from "../../chat/engine";
+import { FeishuBot } from "../../integrations/feishu";
+import { TaskScheduler } from "../../tasks";
+import { HeartbeatSystem } from "../../heartbeat";
+import { SubAgentSystem } from "../../subagents";
+import { setSubAgentSystem } from "../../tools/index";
 import { Hono } from "hono";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ChatRequest } from "../../chat/types";
 import pino from "pino";
 import { WorkingMemory } from "../../memory/working-memory";
-import { ShortTermMemory } from "../../memory/short-term-memory";
+import type { ConversationMessage } from "../../memory/working-memory";
+import { ShortTermMemory, type DatabaseService } from "../../memory/short-term-memory";
 import { UserProfileService } from "../../memory/user-profile";
 import { Mem0MemoryManager } from "../../memory/mem0-memory-manager";
 import { createMem0Memory } from "../../memory/mem0-factory";
@@ -73,6 +79,7 @@ import { MarkdownMemory } from "../../memory/markdown-memory";
 import { DailySummarizer } from "../../memory/daily-summarizer";
 import { SecurityLayer } from "../../security/security-layer";
 import { PromptBuilder } from "../../agent/prompt-builder";
+import { type IMemoryManager as PromptBuilderMemoryManager } from "../../memory/memory-manager";
 import { createHonoApp } from "../../infra/hono-app";
 
 export {
@@ -99,7 +106,7 @@ export type {
   LLMService,
   AgentCore,
   EventBus,
-  SandboxManager,
+  ISandboxManagerToken as SandboxManager,
   IToolRegistry,
   IToolExecutor,
 };
@@ -283,6 +290,15 @@ export function createContainer(): Container {
       registry.register(globTool);
       registry.register(grepTool);
       registry.register(webSearchTool);
+
+      // Register web_fetch (already exists in builtin but was not wired up)
+      registry.register(webFetchTool);
+
+      // Adapt and register legacy-only tools (FeishuDoc, FeishuDrive, etc.)
+      // See src/tools/legacy-adapter.ts for details on the adaptation strategy
+      for (const legacyTool of adaptLegacyTools()) {
+        registry.register(legacyTool);
+      }
       return registry;
     },
   });
@@ -297,8 +313,8 @@ export function createContainer(): Container {
       const toolRegistry = resolver.resolve(TOOL_REGISTRY);
       const securityLayer = new SecurityLayer(undefined, logger);
       return new ToolExecutor(
-        new Map(toolRegistry.getAll().map((t: any) => [t.name, t])),
-        sandboxManager as any,
+        new Map(toolRegistry.getAll().map((t: FlashClawToolDefinition<any, any>) => [t.name, t])),
+        sandboxManager as ISandboxManager,
         securityLayer,
         logger
       );
@@ -375,7 +391,7 @@ export function createContainer(): Container {
     lifecycle: Lifecycle.Singleton,
     factory: (resolver) => {
       const mainDb = resolver.resolve(DATABASE);
-      const stm = new ShortTermMemory(mainDb as any);
+      const stm = new ShortTermMemory(mainDb as DatabaseService);
       stm.initialize();
       return stm;
     },
@@ -388,7 +404,7 @@ export function createContainer(): Container {
     factory: (resolver) => {
       const logger = resolver.resolve(LOGGER);
       const mainDb = resolver.resolve(DATABASE);
-      return new UserProfileService(mainDb as any, logger);
+      return new UserProfileService(mainDb as DatabaseService, logger);
     },
   });
 
@@ -405,11 +421,11 @@ export function createContainer(): Container {
       const mem0Memory = createMem0Memory(logger);
       return new Mem0MemoryManager(
         logger,
-        workingMemory as any,
-        shortTermMemory as any,
+        workingMemory as WorkingMemory,
+        shortTermMemory as ShortTermMemory,
         mem0Memory,
-        markdownMemory as any,
-        userProfile as any,
+        markdownMemory as MarkdownMemory,
+        userProfile as UserProfileService,
       );
     },
   });
@@ -432,8 +448,8 @@ export function createContainer(): Container {
       const contextBudget = resolver.resolve(CONTEXT_BUDGET);
       const memoryManager = resolver.resolve(MEMORY_MANAGER);
       return new PromptBuilder(
-        contextBudget as any,
-        memoryManager as any,
+        contextBudget as ContextBudget,
+        memoryManager as PromptBuilderMemoryManager,
         logger,
       );
     },
@@ -451,7 +467,7 @@ export function createContainer(): Container {
       const toolExecutor = resolver.resolve(TOOL_EXECUTOR);
       const memoryManager = resolver.resolve(MEMORY_MANAGER);
 
-      function toQwenTools(tools: any): any[] {
+      function toQwenTools(tools: FlashClawToolDefinition<any, any>[]): any[] {
         const fromZod = (schema: any) => {
           if (!schema) return { type: "object", properties: {} };
           try {
@@ -461,17 +477,7 @@ export function createContainer(): Container {
           }
         };
 
-        if (Array.isArray(tools)) {
-          return tools.map((t: any) => ({
-            type: "function",
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: fromZod(t.inputSchema),
-            },
-          }));
-        }
-        return Object.values(tools).map((t: any) => ({
+        return tools.map((t) => ({
           type: "function",
           function: {
             name: t.name,
@@ -481,26 +487,27 @@ export function createContainer(): Container {
         }));
       }
 
+      const engine = new ChatEngine();
+
       const qwenTools = toQwenTools(toolRegistry.getAll());
-      chatEngine.setTools(qwenTools as any);
-      chatEngine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
+      engine.setTools(qwenTools);
+      engine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
         logger.debug(`[TOOL_CALL] ${name}`, { args: JSON.stringify(args).substring(0, 200) });
         const execResult = await toolExecutor.execute(name, args, sessionId) as { success: boolean; output?: string; error?: string };
         logger.debug(`[TOOL_RESULT] ${name}`, { success: execResult.success, error: execResult.error });
         return { result: execResult.output, error: execResult.error || undefined };
       });
-      chatEngine.setMemoryManager(memoryManager as any);
+      engine.setMemoryManager(memoryManager as PromptBuilderMemoryManager);
 
       // Wire WorkingMemory as single source of truth for session history
       const workingMemory = resolver.resolve(WORKING_MEMORY);
-      chatEngine.setWorkingMemory(workingMemory as any);
+      engine.setWorkingMemory(workingMemory as WorkingMemory);
 
-      // 注入任务调度器 API，使 ChatEngine 能从用户消息中创建定时任务
-      chatEngine.setTaskScheduler(taskScheduler as any);
+      // 注入任务调度器 API — deferred to bootstrap() after TaskScheduler is resolved
 
       logger.info("ChatEngine initialized with tools", { toolCount: qwenTools.length });
 
-      return chatEngine as any;
+      return engine;
     },
   });
 
@@ -509,7 +516,7 @@ export function createContainer(): Container {
     token: FEISHU_BOT,
     lifecycle: Lifecycle.Singleton,
     factory: () => {
-      return feishuBot as any;
+      return new FeishuBot();
     },
   });
 
@@ -518,7 +525,7 @@ export function createContainer(): Container {
     token: TASK_SCHEDULER,
     lifecycle: Lifecycle.Singleton,
     factory: () => {
-      return taskScheduler as any;
+      return new TaskScheduler();
     },
   });
 
@@ -527,7 +534,7 @@ export function createContainer(): Container {
     token: HEARTBEAT_SYSTEM,
     lifecycle: Lifecycle.Singleton,
     factory: () => {
-      return heartbeatSystem as any;
+      return new HeartbeatSystem();
     },
   });
 
@@ -536,7 +543,7 @@ export function createContainer(): Container {
     token: SUB_AGENT_SYSTEM,
     lifecycle: Lifecycle.Singleton,
     factory: () => {
-      return subAgentSystem as any;
+      return new SubAgentSystem();
     },
   });
 
@@ -545,21 +552,21 @@ export function createContainer(): Container {
     token: HTTP_SERVER,
     lifecycle: Lifecycle.Singleton,
     factory: (resolver) => {
-      const chatEngine = resolver.resolve(CHAT_ENGINE);
-      const feishuBot = resolver.resolve(FEISHU_BOT);
-      const taskScheduler = resolver.resolve(TASK_SCHEDULER);
-      const heartbeatSystem = resolver.resolve(HEARTBEAT_SYSTEM);
-      const subAgentSystem = resolver.resolve(SUB_AGENT_SYSTEM);
+      const ce = resolver.resolve(CHAT_ENGINE);
+      const fb = resolver.resolve(FEISHU_BOT);
+      const ts = resolver.resolve(TASK_SCHEDULER);
+      const hs = resolver.resolve(HEARTBEAT_SYSTEM);
+      const sa = resolver.resolve(SUB_AGENT_SYSTEM);
       const logger = resolver.resolve(LOGGER);
 
       return createHonoApp({
-        chatEngine: chatEngine as any,
-        feishuBot: feishuBot as any,
-        taskScheduler: taskScheduler as any,
-        heartbeatSystem: heartbeatSystem as any,
-        subAgentSystem: subAgentSystem as any,
+        chatEngine: ce,
+        feishuBot: fb,
+        taskScheduler: ts,
+        heartbeatSystem: hs,
+        subAgentSystem: sa,
         logger,
-      }) as any;
+      });
     },
   });
 
@@ -574,16 +581,16 @@ export async function bootstrap(): Promise<Container> {
 
   // Wire TaskScheduler executor & notifier, then start
   try {
-    const ts = container.resolve(TASK_SCHEDULER) as any;
-    const ce = container.resolve(CHAT_ENGINE) as any;
-    const fb = container.resolve(FEISHU_BOT) as any;
+    const ts = container.resolve(TASK_SCHEDULER);
+    const ce = container.resolve(CHAT_ENGINE);
+    const fb = container.resolve(FEISHU_BOT);
     const tsLogger = container.resolve(LOGGER);
 
     // 注入任务执行器：每个任务通过 ChatEngine 处理并返回结果
     ts.setExecutor(async (taskMessage: string, taskId: string) => {
       tsLogger.info(`[TaskScheduler] Executing task ${taskId}`);
       const result = await ce.chat({ message: taskMessage, sessionId: `task_${taskId}` });
-      return (result as any).response || String(result);
+      return result.response || String(result);
     });
 
     // 注入通知器：任务执行完成后通过飞书发送结果
@@ -603,6 +610,9 @@ export async function bootstrap(): Promise<Container> {
       }
     });
 
+    // 注入任务调度器 API，使 ChatEngine 能从用户消息中创建定时任务
+    ce.setTaskScheduler(ts);
+
     ts.start();
     tsLogger.info("TaskScheduler wired and started");
 
@@ -611,13 +621,29 @@ export async function bootstrap(): Promise<Container> {
     fb.setTaskScheduler(ts);
     fb.start();
     tsLogger.info("FeishuBot DI wired and started");
+
+    // 注入心跳系统的依赖：ChatEngine + TaskScheduler + FeishuBot，然后启动
+    const hs = container.resolve(HEARTBEAT_SYSTEM);
+    hs.setChatEngine(ce);
+    hs.setTaskScheduler(ts);
+    hs.setFeishuBot(fb);
+    hs.start();
+    tsLogger.info("HeartbeatSystem DI wired and started");
+
+    // 注入子代理系统的依赖：ChatEngine
+    const sa = container.resolve(SUB_AGENT_SYSTEM);
+    sa.setChatEngine(ce);
+    setSubAgentSystem(sa);
+    tsLogger.info("SubAgentSystem DI wired");
   } catch (err) {
     const logger = container.resolve(LOGGER);
     logger.error("TaskScheduler wiring failed (non-fatal)", { err });
   }
 
   // Periodic consolidation: extract durable facts from daily logs to MEMORY.md
-  // Runs once on startup if last consolidation was > 24h ago
+  // Runs once on startup if last consolidation was > 24h ago.
+  // Uses incremental reads: only fetches logs created *after* the last
+  // consolidation date, avoiding redundant re-processing of old logs.
   try {
     const markdownMemory = container.resolve(MARKDOWN_MEMORY);
     const logger = container.resolve(LOGGER);
@@ -626,17 +652,24 @@ export async function bootstrap(): Promise<Container> {
     const shouldConsolidate = !lastDate || lastDate < today;
     
     if (shouldConsolidate) {
-      const dailyLogs = await markdownMemory.getDailyLogs(7);
+      // Incremental: only read logs since the last consolidation date (max 7 days).
+      // If lastDate is null (first run), getDailyLogsSince falls back to getDailyLogs(7).
+      const dailyLogs = await markdownMemory.getDailyLogsSince(lastDate, 7);
       if (dailyLogs.length > 0) {
         const existingMemory = await markdownMemory.readMemoryFile();
         const dailySummarizer = new DailySummarizer(logger);
         const newFacts = await dailySummarizer.consolidateDailyLogs(dailyLogs, existingMemory);
         if (newFacts) {
           await markdownMemory.appendConsolidatedMemory(newFacts);
-          logger.info("Startup consolidation: new facts added to MEMORY.md");
+          logger.info("Startup consolidation: new facts added to MEMORY.md", {
+            logsProcessed: dailyLogs.length,
+            sinceDateExclusive: lastDate ?? "(first run)",
+          });
         } else {
           logger.debug("Startup consolidation: nothing new to add");
         }
+      } else {
+        logger.debug("Startup consolidation: no new logs since last consolidation", { lastDate });
       }
     }
   } catch (err) {

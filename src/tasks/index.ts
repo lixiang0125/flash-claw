@@ -647,8 +647,3 @@ export class TaskScheduler {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Singleton export (matches old API surface)
-// ---------------------------------------------------------------------------
-
-export const taskScheduler = new TaskScheduler();

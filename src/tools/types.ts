@@ -2,7 +2,7 @@ import { z, ZodType } from "zod";
 
 export type ToolPermissionLevel = "read" | "write" | "execute" | "admin";
 
-export type ToolCategory = "filesystem" | "shell" | "web" | "search" | "utility";
+export type ToolCategory = "filesystem" | "shell" | "web" | "search" | "utility" | "integration";
 
 export interface ToolExecutionContext {
   sessionId: string;

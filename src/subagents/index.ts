@@ -1,5 +1,3 @@
-import { chatEngine } from "../chat";
-
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
@@ -30,12 +28,31 @@ export interface SubAgentRun {
   tokens?: { input: number; output: number; total: number };
 }
 
-class SubAgentSystem {
+/**
+ * DI interface — SubAgentSystem no longer hard-imports ChatEngine.
+ * Injected via setChatEngine() after construction.
+ */
+interface ChatEngineAPI {
+  chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+  getHistoryMessages(sessionId: string): unknown[];
+}
+
+export class SubAgentSystem {
   private runs: Map<string, SubAgentRun> = new Map();
   private abortControllers = new Map<string, AbortController>();
   private maxConcurrent = 8;
   private maxSpawnDepth = 1;
   private maxChildrenPerAgent = 5;
+
+  /* ── DI fields ── */
+  private chatEngineAPI: ChatEngineAPI | null = null;
+
+  /* ── DI setter ── */
+
+  setChatEngine(engine: ChatEngineAPI): void {
+    this.chatEngineAPI = engine;
+    console.log("[SubAgentSystem] ChatEngine attached");
+  }
 
   async spawn(config: SubAgentConfig, parentSessionId: string): Promise<{ status: string; runId: string; childSessionKey: string }> {
     const runId = generateId();
@@ -65,11 +82,19 @@ class SubAgentSystem {
   }
 
   private async executeSubAgent(run: SubAgentRun, config: SubAgentConfig, signal: AbortSignal): Promise<void> {
+    if (!this.chatEngineAPI) {
+      run.status = "failed";
+      run.error = "ChatEngine not injected";
+      run.finishedAt = new Date();
+      this.runs.set(run.id, run);
+      return;
+    }
+
     try {
       const timeoutMs = config.runTimeoutSeconds ? config.runTimeoutSeconds * 1000 : undefined;
       
       const result = await Promise.race([
-        chatEngine.chat({
+        this.chatEngineAPI.chat({
           message: run.task,
           sessionId: run.sessionId,
         }),
@@ -119,7 +144,8 @@ class SubAgentSystem {
   }
 
   private announceToParent(run: SubAgentRun): void {
-    const parentHistory = chatEngine.getHistoryMessages(run.parentSessionId);
+    if (!this.chatEngineAPI) return;
+    const parentHistory = this.chatEngineAPI.getHistoryMessages(run.parentSessionId);
     
     const statusText = run.status === "completed" ? "success" : run.status;
     const announceMessage = `## Sub-agent Result: ${run.label || run.id}
@@ -203,5 +229,3 @@ class SubAgentSystem {
     };
   }
 }
-
-export const subAgentSystem = new SubAgentSystem();

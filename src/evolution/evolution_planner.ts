@@ -1,4 +1,3 @@
-import { chatEngine } from "../chat";
 import type { FeedbackAnalysis } from "./feedback_analyzer";
 
 export interface EvolutionPlan {
@@ -11,6 +10,11 @@ export interface EvolutionPlan {
   newContent: string;
   riskLevel: "low" | "medium" | "high";
   createTime: number;
+}
+
+/** Minimal ChatEngine interface required by the evolution planner. */
+interface ChatEngineAPI {
+  chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
 }
 
 function generateId(): string {
@@ -44,7 +48,7 @@ const PLANNER_PROMPT = `你是 Flash Claw 的进化方案生成助手。根据�
   "riskLevel": "medium"
 }`;
 
-export async function generateEvolutionPlan(analysis: FeedbackAnalysis): Promise<EvolutionPlan | null> {
+export async function generateEvolutionPlan(analysis: FeedbackAnalysis, chatEngine: ChatEngineAPI): Promise<EvolutionPlan | null> {
   if (analysis.type === "normal_chat") {
     return null;
   }

@@ -35,7 +35,8 @@ async function cmdRun() {
 }
 
 async function cmdTasks(args: string[]) {
-  const { taskScheduler } = await import("./tasks/index.js");
+  const { TaskScheduler } = await import("./tasks/index.js");
+  const taskScheduler = new TaskScheduler();
 
   if (args.includes("--cleanall")) {
     const tasks = taskScheduler.listTasks();
@@ -100,7 +101,8 @@ async function cmdSkills(args: string[]) {
 }
 
 async function cmdSubAgents(args: string[]) {
-  const { subAgentSystem } = await import("./subagents/index.js");
+  const { SubAgentSystem } = await import("./subagents/index.js");
+  const subAgentSystem = new SubAgentSystem();
 
   const killIndex = args.indexOf("--kill");
   if (killIndex !== -1 && args[killIndex + 1]) {

@@ -39,7 +39,7 @@ function wmToChat(msgs: ConversationMessage[]): ChatMessage[] {
 }
 
 /** 聊天引擎 —— 核心对话处理模块，负责 LLM 交互、工具调用、记忆检索与任务调度。 */
-class ChatEngine {
+export class ChatEngine {
   private client: OpenAI;
   private sessionSkills: Map<string, Skill[]> = new Map();
   private tools: any[] = [];
@@ -389,4 +389,3 @@ class ChatEngine {
   }
 }
 
-export const chatEngine = new ChatEngine();

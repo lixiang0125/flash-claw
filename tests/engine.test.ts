@@ -11,13 +11,15 @@ mock.module("../src/chat/llm-parser", () => ({
 }));
 
 import { WorkingMemory } from "../src/memory/working-memory";
-import { chatEngine } from "../src/chat/engine";
+import { ChatEngine } from "../src/chat/engine";
+
+const chatEngine = new ChatEngine();
 
 // ============================================================================
 // ChatEngine 单元测试
 // ============================================================================
 // 测试策略:
-//   1. chatEngine 是单例，每个测试通过 DI setter 重新注入依赖
+//   1. chatEngine 在此处创建为独立实例，每个测试通过 DI setter 重新注入依赖
 //   2. OpenAI client 通过 (chatEngine as any).client 替换为 mock
 //   3. llm-parser 模块已全局 mock，rewriteMemoryQuery 直接透传
 //   4. WorkingMemory 使用真实实例

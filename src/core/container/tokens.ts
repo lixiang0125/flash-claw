@@ -1,4 +1,23 @@
 import { createToken, type ServiceToken } from "./types";
+import type { ConversationMessage } from "../../memory/working-memory";
+import type { ChatRequest, ChatResponse } from "../../chat/types";
+import type { UserProfile } from "../../memory/user-profile";
+import type {
+  MemoryEntry,
+  MemoryQuery,
+  MemorySearchResult,
+  IncomingMessage,
+} from "../../memory/mem0-memory-manager";
+import type { FlashClawToolDefinition } from "../../tools/types";
+import type {
+  SandboxInstance,
+  ExecResult,
+} from "../../tools/sandbox/sandbox-types";
+
+// Re-export so consumers can import from tokens
+export type { ConversationMessage } from "../../memory/working-memory";
+export type { UserProfile } from "../../memory/user-profile";
+export type { MemoryEntry, MemoryQuery, MemorySearchResult, IncomingMessage } from "../../memory/mem0-memory-manager";
 
 export interface AppConfig {
   readonly port: number;
@@ -107,25 +126,42 @@ export const AGENT_CORE: ServiceToken<AgentCore> =
 
 export interface SandboxManager {
   initialize(): Promise<void>;
-  acquire(sessionId: string): Promise<unknown>;
+  acquire(sessionId: string): Promise<SandboxInstance>;
   release(sessionId: string): Promise<void>;
-  exec(sessionId: string, command: string, timeoutMs?: number): Promise<unknown>;
+  exec(sessionId: string, command: string, timeoutMs?: number): Promise<ExecResult>;
   dispose(): Promise<void>;
 }
 
 export const SANDBOX_MANAGER: ServiceToken<SandboxManager> =
   createToken<SandboxManager>("SANDBOX_MANAGER");
 
+// ===== Tool System =====
+
 export interface ToolRegistry {
-  getAll(): Array<{ name: string; description: string; inputSchema: unknown }>;
-  get(name: string): unknown;
+  register(tool: FlashClawToolDefinition<any, any>): void;
+  unregister(name: string): boolean;
+  get(name: string): FlashClawToolDefinition<any, any> | undefined;
+  getAll(): FlashClawToolDefinition<any, any>[];
+  readonly size: number;
 }
 
 export const TOOL_REGISTRY: ServiceToken<ToolRegistry> =
   createToken<ToolRegistry>("TOOL_REGISTRY");
 
 export interface ToolExecutor {
-  execute(toolName: string, input: unknown, sessionId: string): Promise<unknown>;
+  execute(toolName: string, input: unknown, sessionId: string): Promise<{
+    success: boolean;
+    data: unknown;
+    error: string | null;
+    durationMs: number;
+    output: string;
+    metadata: {
+      toolName: string;
+      inputSummary: string;
+      sandboxUsed: boolean;
+      approvalRequired: boolean;
+    };
+  }>;
 }
 
 export const TOOL_EXECUTOR: ServiceToken<ToolExecutor> =
@@ -173,10 +209,28 @@ export const VECTOR_STORE: ServiceToken<IVectorStore> =
   createToken<IVectorStore>("VECTOR_STORE");
 
 export interface IWorkingMemory {
-  append(sessionId: string, message: unknown): void;
-  getMessages(sessionId: string): unknown[];
-  getRecent(sessionId: string, count: number): unknown[];
+  append(sessionId: string, message: ConversationMessage): void;
+  getMessages(sessionId: string): ConversationMessage[];
+  getRecent(sessionId: string, count: number): ConversationMessage[];
   clear(sessionId: string): void;
+  resetSession(sessionId: string): Promise<void>;
+  compress(
+    sessionId: string,
+    summarizer: (messages: ConversationMessage[]) => Promise<string>,
+  ): Promise<void>;
+  getStats(sessionId: string): { messageCount: number; estimatedTokens: number };
+  getConfig(): {
+    maxMessages: number;
+    maxTokens: number;
+    enableCompression: boolean;
+    compressionThreshold: number;
+    memoryFlushEnabled: boolean;
+    memoryFlushSoftThreshold: number;
+    reserveTokensFloor: number;
+  };
+  setFlushCallback(
+    fn: (sessionId: string, messages: ConversationMessage[]) => Promise<void>,
+  ): void;
 }
 
 export const WORKING_MEMORY: ServiceToken<IWorkingMemory> =
@@ -184,9 +238,20 @@ export const WORKING_MEMORY: ServiceToken<IWorkingMemory> =
 
 export interface IShortTermMemory {
   initialize(): void;
-  upsertSession(sessionId: string, userId: string, platform: string, metadata?: unknown): void;
-  saveMessage(sessionId: string, message: unknown): string;
-  getHistory(sessionId: string, limit?: number, beforeTimestamp?: number): unknown[];
+  upsertSession(
+    sessionId: string,
+    userId: string,
+    platform: string,
+    metadata?: Record<string, unknown>,
+  ): void;
+  saveMessage(sessionId: string, message: ConversationMessage): string;
+  getHistory(
+    sessionId: string,
+    limit?: number,
+    beforeTimestamp?: number,
+  ): ConversationMessage[];
+  cleanup(): number;
+  dispose(): void;
 }
 
 export const SHORT_TERM_MEMORY: ServiceToken<IShortTermMemory> =
@@ -201,20 +266,26 @@ export const LONG_TERM_MEMORY: ServiceToken<ILongTermMemory> =
   createToken<ILongTermMemory>("LONG_TERM_MEMORY");
 
 export interface IUserProfile {
-  getProfile(userId: string): Promise<unknown>;
-  updateProfile(userId: string, updates: unknown): Promise<void>;
+  getProfile(userId: string): Promise<UserProfile>;
+  updateProfile(userId: string, updates: Partial<UserProfile>): Promise<void>;
 }
 
 export const USER_PROFILE: ServiceToken<IUserProfile> =
   createToken<IUserProfile>("USER_PROFILE");
 
 export interface IMemoryManager {
-  store(entry: unknown): Promise<string>;
-  recall(query: unknown): Promise<unknown[]>;
-  storeInteraction(msg: unknown, response: string): Promise<void>;
-  resetSession(sessionId: string): Promise<void>;
-  getUserProfile(userId: string): Promise<unknown>;
-  updateUserProfile(userId: string, updates: unknown): Promise<void>;
+  store(
+    entry: Omit<MemoryEntry, "id" | "accessCount" | "lastAccessedAt">,
+  ): Promise<string>;
+  recall(query: MemoryQuery): Promise<MemorySearchResult[]>;
+  storeInteraction(msg: IncomingMessage, response: string): Promise<void>;
+  getUserProfile(userId: string): Promise<UserProfile>;
+  updateUserProfile(
+    userId: string,
+    updates: Partial<UserProfile>,
+  ): Promise<void>;
+  cleanup(maxAge?: number): Promise<number>;
+  resetSession?(sessionId: string): Promise<void>;
 }
 
 export const MEMORY_MANAGER: ServiceToken<IMemoryManager> =
@@ -223,28 +294,76 @@ export const MEMORY_MANAGER: ServiceToken<IMemoryManager> =
 export interface IContextBudget {
   getAllocations(): Record<string, number>;
   estimateTokens(text: string): number;
-  truncateHistory(messages: unknown[], maxTokens: number): unknown[];
+  truncateHistory(
+    messages: ConversationMessage[],
+    maxTokens: number,
+  ): ConversationMessage[];
+  rebalance(actualUsage: Record<string, number>): Record<string, number>;
+  readonly totalBudget: number;
 }
 
 export const CONTEXT_BUDGET: ServiceToken<IContextBudget> =
   createToken<IContextBudget>("CONTEXT_BUDGET");
 
+export interface AgentContext {
+  user: {
+    userId: string;
+    name: string;
+    language: string;
+    communicationStyle: string;
+    timezone: string;
+    keyFacts: string[];
+  };
+  history: ConversationMessage[];
+  activeSkills: unknown[];
+  memories: MemoryEntry[];
+}
+
 export interface IPromptBuilder {
-  build(context: unknown, userMessage: string): Promise<unknown[]>;
-  estimateTokens(messages: unknown[]): number;
+  build(
+    context: AgentContext,
+    userMessage: string,
+  ): Promise<ConversationMessage[]>;
+  estimateTokens(messages: ConversationMessage[]): number;
 }
 
 export const PROMPT_BUILDER: ServiceToken<IPromptBuilder> =
   createToken<IPromptBuilder>("PROMPT_BUILDER");
 
 export interface IChatEngine {
-  chat(request: unknown): Promise<unknown>;
-  setMemoryManager(manager: unknown): void;
-  setWorkingMemory(wm: unknown): void;
-  setTaskScheduler(api: unknown): void;
+  chat(request: ChatRequest): Promise<ChatResponse>;
+  setMemoryManager(manager: IMemoryManager): void;
+  setWorkingMemory(wm: IWorkingMemory): void;
+  setTaskScheduler(api: {
+    createTask(task: {
+      name: string;
+      message: string;
+      schedule: string;
+      enabled: boolean;
+    }): unknown;
+    createOneTimeTask(task: {
+      name: string;
+      message: string;
+      executeAfter: number;
+    }): unknown;
+  }): void;
   setTools(tools: unknown[]): void;
-  setToolExecutor(executor: unknown): void;
+  setToolExecutor(
+    executor: (
+      name: string,
+      args: Record<string, unknown>,
+      sessionId: string,
+    ) => Promise<{ result: unknown; error?: string }>,
+  ): void;
   clearSession(sessionId: string): void | Promise<void>;
+  getHistoryMessages(
+    sessionId: string,
+  ): Array<{
+    role: "system" | "user" | "assistant" | "tool";
+    content: string;
+    tool_call_id?: string;
+    name?: string;
+  }>;
 }
 
 export const CHAT_ENGINE: ServiceToken<IChatEngine> =
@@ -254,8 +373,12 @@ export interface IFeishuBot {
   handleEvent(body: unknown): Promise<unknown>;
   isConfigured(): boolean;
   getConfig(): unknown;
-  setChatEngine(engine: unknown): void;
-  setTaskScheduler(scheduler: unknown): void;
+  setChatEngine(engine: {
+    chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+  }): void;
+  setTaskScheduler(scheduler: {
+    setLastChatId(chatId: string): void;
+  }): void;
   start(): void;
   sendMessage(chatId: string, userId?: unknown, text?: string): Promise<void>;
   notify(chatId: string, text: string): Promise<void>;
@@ -265,16 +388,40 @@ export const FEISHU_BOT: ServiceToken<IFeishuBot> =
   createToken<IFeishuBot>("FEISHU_BOT");
 
 export interface ITaskScheduler {
-  listTasks(): unknown[];
-  createTask(task: unknown): unknown;
-  createOneTimeTask(task: { name: string; message: string; executeAfter: number }): unknown;
+  listTasks(): Array<{
+    id: string;
+    name: string;
+    message: string;
+    schedule: string;
+    enabled: boolean;
+    lastRun?: string;
+    nextRun?: string;
+    createdAt: string;
+  }>;
+  createTask(task: {
+    name: string;
+    message: string;
+    schedule: string;
+    enabled: boolean;
+  }): unknown;
+  createOneTimeTask(task: {
+    name: string;
+    message: string;
+    executeAfter: number;
+  }): unknown;
   getTask(id: string): unknown;
   updateTask(id: string, updates: unknown): unknown;
   deleteTask(id: string): boolean;
   runTask(id: string): Promise<unknown>;
-  getTaskRuns(id: string): unknown[];
-  setExecutor(fn: (taskMessage: string, taskId: string) => Promise<string>): void;
-  setNotifier(fn: (taskName: string, result: string) => Promise<void>): void;
+  getTaskRuns(id: string, limit?: number): unknown[];
+  setExecutor(
+    fn: (taskMessage: string, taskId: string) => Promise<string>,
+  ): void;
+  setNotifier(
+    fn: (taskName: string, result: string) => Promise<void>,
+  ): void;
+  setLastChatId(chatId: string): void;
+  getLastChatId(): string | null;
   start(): void;
   stop(): void;
 }
@@ -283,18 +430,65 @@ export const TASK_SCHEDULER: ServiceToken<ITaskScheduler> =
   createToken<ITaskScheduler>("TASK_SCHEDULER");
 
 export interface IHeartbeatSystem {
-  getStatus(): unknown;
-  trigger(): Promise<unknown>;
+  getStatus(): { running: boolean; checks: unknown[] };
+  trigger(): Promise<unknown[]>;
   getHeartbeatFile(): string;
+  setChatEngine(engine: {
+    chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+  }): void;
+  setTaskScheduler(scheduler: {
+    listTasks(): { enabled: boolean; nextRun?: string }[];
+    getLastChatId(): string | null;
+  }): void;
+  setFeishuBot(bot: {
+    getStatus?(): { connected: boolean };
+    notify?(chatId: string, message: string): Promise<void>;
+  }): void;
+  start(): void;
 }
 
 export const HEARTBEAT_SYSTEM: ServiceToken<IHeartbeatSystem> =
   createToken<IHeartbeatSystem>("HEARTBEAT_SYSTEM");
 
 export interface ISubAgentSystem {
-  listRuns(): unknown[];
-  getRun(id: string): unknown;
+  listRuns(parentSessionId?: string): Array<{
+    id: string;
+    label?: string;
+    sessionId: string;
+    parentSessionId: string;
+    task: string;
+    status: "running" | "completed" | "failed" | "timeout";
+    result?: string;
+    error?: string;
+    startedAt: Date;
+    finishedAt?: Date;
+    runtime?: string;
+  }>;
+  getRun(id: string): {
+    id: string;
+    label?: string;
+    sessionId: string;
+    parentSessionId: string;
+    task: string;
+    status: "running" | "completed" | "failed" | "timeout";
+    result?: string;
+    error?: string;
+    startedAt: Date;
+    finishedAt?: Date;
+    runtime?: string;
+  } | undefined;
   killRun(id: string): boolean;
+  setChatEngine(engine: {
+    chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+    getHistoryMessages(sessionId: string): unknown[];
+  }): void;
+  spawn(config: {
+    task: string;
+    label?: string;
+    runTimeoutSeconds?: number;
+    mode?: string;
+    cleanup?: string;
+  }, parentSessionId: string): Promise<{ status: string; runId: string; childSessionKey: string }>;
 }
 
 export const SUB_AGENT_SYSTEM: ServiceToken<ISubAgentSystem> =
@@ -311,13 +505,14 @@ export interface IMarkdownMemory {
   searchInFiles(query: string, limit?: number): Promise<unknown[]>;
   getMemoryContent(section?: string): Promise<string>;
   getDailyLogs(days?: number): Promise<string[]>;
+  getDailyLogsSince(sinceDate: string | null, maxDays?: number): Promise<string[]>;
 }
 
 export const MARKDOWN_MEMORY: ServiceToken<IMarkdownMemory> =
   createToken<IMarkdownMemory>("MARKDOWN_MEMORY");
 
 export interface HonoApp {
-  fetch: unknown;
+  fetch(request: Request, Env?: {} | unknown, executionCtx?: unknown): Response | Promise<Response>;
 }
 
 export const HTTP_SERVER: ServiceToken<HonoApp> =

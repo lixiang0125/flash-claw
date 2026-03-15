@@ -1,7 +1,20 @@
+export interface BlockedPathEntry {
+  pattern: string;
+  mode: "read" | "write" | "both";
+  description: string;
+}
+
+export interface BlockedCommandEntry {
+  pattern: string;
+  description: string;
+}
+
 export interface SecurityPolicy {
   readablePathPatterns: string[];
   writablePathPatterns: string[];
-  blockedCommands: string[];
+  blockedCommands: (string | BlockedCommandEntry)[];
+  blockedPaths?: BlockedPathEntry[];
+  allowedExecutables?: string[];
   rateLimitPerMinute: number;
   enforceSandbox: boolean;
 }
@@ -15,11 +28,13 @@ export interface SecurityCheckResult {
 export interface AuditEntry {
   id?: number;
   timestamp: number;
-  userId: string;
-  sessionId: string;
   action: string;
-  target: string;
-  result: "allowed" | "blocked";
+  detail?: string;
+  target?: string;
+  allowed?: boolean;
+  result?: "allowed" | "blocked";
+  userId?: string;
+  sessionId?: string;
   reason?: string;
   metadata?: Record<string, unknown>;
 }

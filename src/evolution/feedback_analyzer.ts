@@ -1,5 +1,3 @@
-import { chatEngine } from "../chat";
-
 export type FeedbackType = 
   | "skill_optimize"
   | "skill_add"
@@ -15,6 +13,11 @@ export interface FeedbackAnalysis {
   demand: string;
   priority: "high" | "medium" | "low";
   createTime: number;
+}
+
+/** Minimal ChatEngine interface required by the feedback analyzer. */
+interface ChatEngineAPI {
+  chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
 }
 
 function generateId(): string {
@@ -51,7 +54,7 @@ const ANALYSIS_PROMPT = `你是 Flash Claw 的反馈分析助手，需要分析�
   "priority": "high"
 }`;
 
-export async function analyzeFeedback(userInput: string): Promise<FeedbackAnalysis> {
+export async function analyzeFeedback(userInput: string, chatEngine: ChatEngineAPI): Promise<FeedbackAnalysis> {
   try {
     const response = await chatEngine.chat({
       message: `${ANALYSIS_PROMPT}\n\n用户输入：${userInput}`,

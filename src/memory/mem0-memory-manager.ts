@@ -73,13 +73,36 @@ const DEFAULT_CONFIG: Mem0MemoryManagerConfig = {
 };
 
 /**
- * Memory manager backed by mem0 (vector LTM) + WorkingMemory + ShortTermMemory.
+ * Mem0-backed memory manager — the **coordination layer** for multi-source recall.
  *
- * Markdown daily logs are written by the pre-compaction agentic flush in
- * bootstrap.ts (OpenClaw-style), NOT by this class. This class focuses on:
- *   - Storing interactions to WorkingMemory, ShortTermMemory, and mem0
- *   - Recalling memories with multi-source fusion
- *   - User profile management
+ * Architecture role (orchestrator — delegates to each memory layer):
+ *
+ *   ┌────────────────────────────────────────────────┐
+ *   │              Mem0MemoryManager                  │
+ *   │         (orchestrator / query router)           │
+ *   ├────────────┬────────────┬───────────┬──────────┤
+ *   │ Working    │ ShortTerm  │ mem0      │ Markdown │
+ *   │ Memory     │ Memory     │ (vector)  │ Memory   │
+ *   │ (session)  │ (SQLite)   │ (LTM)     │ (files)  │
+ *   └────────────┴────────────┴───────────┴──────────┘
+ *
+ * Each layer's responsibility in recall():
+ *   - WorkingMemory:   Current session's recent messages (hot buffer, <5 items).
+ *                      Already used directly by ChatEngine for context window;
+ *                      included here for completeness in cross-source search.
+ *   - ShortTermMemory: SQLite-backed session history. Not queried by recall()
+ *                      directly (accessed via ChatEngine's history loading).
+ *   - mem0 (vector):   Semantic search across all sessions. The primary source
+ *                      for cross-session long-term recall.
+ *   - MarkdownMemory:  Full-text search over MEMORY.md and daily log files.
+ *                      Captures durable facts and daily conversation digests.
+ *                      Accessed via searchInFiles(), not in default recall path.
+ *
+ * Storage flow (storeInteraction):
+ *   1. Append to WorkingMemory (immediate, in-process)
+ *   2. Persist to ShortTermMemory/SQLite (synchronous)
+ *   3. Send to mem0 for LLM extraction (async, non-blocking)
+ *   4. Markdown daily logs handled by bootstrap.ts pre-compaction flush
  */
 export class Mem0MemoryManager implements IMemoryManager {
   private config: Mem0MemoryManagerConfig;
@@ -136,9 +159,25 @@ export class Mem0MemoryManager implements IMemoryManager {
     return crypto.randomUUID();
   }
 
+  /**
+   * Multi-source recall with hash-based deduplication.
+   *
+   * Query routing:
+   *   1. WorkingMemory — current session's recent messages (if sessionId given)
+   *   2. mem0 vector search — semantic cross-session long-term recall
+   *
+   * Note: ShortTermMemory (SQLite) is accessed by ChatEngine directly for
+   * session history loading, not through this recall path.
+   * MarkdownMemory search is available via searchInFiles() but not included
+   * in the default recall to avoid slow filesystem scans on every query.
+   */
   async recall(query: MemoryQuery): Promise<MemorySearchResult[]> {
     const results: MemorySearchResult[] = [];
     const limit = query.limit || this.config.defaultLimit;
+
+    // --- Layer 1: WorkingMemory (current session hot buffer) ---
+    // Fast, in-process lookup. Only includes recent user/assistant messages
+    // from the active session. Provides immediate conversational context.
     if (query.sessionId) {
       const recent = this.workingMemory.getRecent(query.sessionId, 5);
       for (const msg of recent) {
@@ -160,6 +199,10 @@ export class Mem0MemoryManager implements IMemoryManager {
         });
       }
     }
+
+    // --- Layer 2: mem0 vector search (cross-session long-term memory) ---
+    // Semantic similarity search over all stored memories. Returns candidates
+    // ranked by embedding distance, then re-scored with recency/importance.
     try {
       const mem0Results = await this.mem0.search(query.text, {
         userId: query.userId,
@@ -173,7 +216,8 @@ export class Mem0MemoryManager implements IMemoryManager {
     } catch (err) {
       this.logger.error("mem0 search failed", { err, query: query.text });
     }
-    return this.dedupeAndSort(results, limit);
+
+    return this.deduplicateResults(results, limit);
   }
 
   async storeInteraction(msg: IncomingMessage, response: string): Promise<void> {
@@ -244,16 +288,64 @@ export class Mem0MemoryManager implements IMemoryManager {
     };
   }
 
-  private dedupeAndSort(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
-    const seen = new Set<string>();
-    const deduped = results.filter((r) => {
-      const key = r.entry.content.slice(0, 100);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    deduped.sort((a, b) => b.relevanceScore - a.relevanceScore);
-    return deduped.slice(0, limit);
+  /**
+   * Hash-based deduplication with substring containment check.
+   *
+   * Replaces the previous simple Set<prefix> approach with a two-tier strategy:
+   *
+   * Tier 1 — Normalized prefix key (O(1) lookup):
+   *   Normalize content (trim, lowercase, collapse whitespace), then use the
+   *   first 100 chars as a hash key. Exact prefix matches are caught instantly.
+   *
+   * Tier 2 — Substring containment (O(n) per new entry, but n is small):
+   *   For entries that survive Tier 1, check if the normalized content is a
+   *   substring of any already-seen entry (or vice versa). This catches cases
+   *   like "user prefers dark mode" vs "user prefers dark mode for all apps"
+   *   without the O(n^2) cost of Levenshtein distance.
+   *
+   * In both tiers, the result with the higher relevanceScore wins.
+   *
+   * Complexity: O(n * k) where n = number of results, k = average size of
+   * `seen` map. Since k is bounded by `limit` (typically 10-20), this is
+   * effectively O(n) for practical workloads.
+   */
+  private deduplicateResults(results: MemorySearchResult[], limit: number): MemorySearchResult[] {
+    const seen = new Map<string, MemorySearchResult>();
+
+    for (const result of results) {
+      // Normalize: trim, lowercase, collapse whitespace
+      const normalizedContent = result.entry.content.trim().toLowerCase().replace(/\s+/g, ' ');
+      const key = normalizedContent.substring(0, 100);
+
+      if (seen.has(key)) {
+        // Tier 1: exact prefix match — keep higher score
+        const existing = seen.get(key)!;
+        if (result.relevanceScore > existing.relevanceScore) {
+          seen.set(key, result);
+        }
+      } else {
+        // Tier 2: substring containment check against existing entries
+        let isDuplicate = false;
+        for (const [existingKey, existing] of seen) {
+          if (normalizedContent.includes(existingKey) || existingKey.includes(normalizedContent)) {
+            // One is a substring of the other — treat as duplicate
+            if (result.relevanceScore > existing.relevanceScore) {
+              seen.delete(existingKey);
+              seen.set(key, result);
+            }
+            isDuplicate = true;
+            break;
+          }
+        }
+        if (!isDuplicate) {
+          seen.set(key, result);
+        }
+      }
+    }
+
+    return [...seen.values()]
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, limit);
   }
 
   async getUserProfile(userId: string): Promise<UserProfile> {

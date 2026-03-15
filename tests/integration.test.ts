@@ -12,7 +12,9 @@ mock.module("../src/chat/llm-parser", () => ({
 
 import { WorkingMemory } from "../src/memory/working-memory";
 import { FeishuBot } from "../src/integrations/feishu";
-import { chatEngine } from "../src/chat/engine";
+import { ChatEngine } from "../src/chat/engine";
+
+const chatEngine = new ChatEngine();
 
 // ============================================================================
 // 集成测试 — DI 链路验证
@@ -66,7 +68,7 @@ function createFeishuMessageEvent(
   };
 }
 
-/** 将 chatEngine 单例完整装配好 (模拟 bootstrap) */
+/** 将 chatEngine 实例完整装配好 (模拟 bootstrap) */
 function wireAll(replyText: string = "模拟回复") {
   const wm = new WorkingMemory();
   const mm = createMockMemoryManager();
@@ -102,7 +104,7 @@ function wireAll(replyText: string = "模拟回复") {
 describe("集成测试 — DI 链路验证", () => {
 
   beforeEach(() => {
-    // 重置单例状态
+    // 重置实例状态
     chatEngine.setWorkingMemory(undefined as any);
     chatEngine.setMemoryManager(undefined as any);
     chatEngine.setTaskScheduler(undefined as any);

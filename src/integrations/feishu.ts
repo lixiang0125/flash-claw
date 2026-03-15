@@ -459,4 +459,3 @@ export class FeishuBot {
   }
 }
 
-export const feishuBot = new FeishuBot();

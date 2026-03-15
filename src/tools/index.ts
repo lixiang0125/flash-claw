@@ -1,3 +1,12 @@
+/**
+ * @deprecated 此文件为旧工具系统，新工具应在 src/tools/builtin/ 下创建。
+ * 此文件中的工具通过 legacy-adapter.ts 适配后注册到新 FlashClawToolDefinition 系统。
+ * 当前仅作为适配桥梁保留——新系统中已有原生实现的工具（bash, read_file 等）
+ * 已由 builtin/*.ts 替代，此处的同名实现不再被直接调用。
+ *
+ * 迁移计划：逐步将 FeishuDoc/FeishuDrive/FeishuPerm/FeishuWiki/GetProfile/
+ * UpdateProfile/SubAgent 等工具迁移为 builtin 原生实现，届时删除此文件。
+ */
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
@@ -5,6 +14,23 @@ import { userProfileStore } from "../profiles";
 import { SecurityLayer } from "../security/security-layer.js";
 
 const securityLayer = new SecurityLayer();
+
+/**
+ * DI: SubAgentSystem 实例由外部（bootstrap.ts）注入，不再通过动态 import 获取单例。
+ */
+interface SubAgentSystemAPI {
+  spawn(config: {
+    task: string;
+    label?: string;
+    runTimeoutSeconds?: number;
+    mode?: string;
+    cleanup?: string;
+  }, parentSessionId: string): Promise<{ status: string; runId: string; childSessionKey: string }>;
+}
+let _subAgentSystem: SubAgentSystemAPI | null = null;
+export function setSubAgentSystem(sys: SubAgentSystemAPI): void {
+  _subAgentSystem = sys;
+}
 
 export interface Tool {
   name: string;
@@ -964,10 +990,12 @@ function executeUpdateProfile(sessionId: string | undefined, args: Record<string
  * 执行子智能体
  */
 async function executeSubAgent(task: string, label?: string, runTimeoutSeconds?: number): Promise<ToolResult> {
-  const { subAgentSystem } = await import("../subagents/index.js");
-  
+  if (!_subAgentSystem) {
+    return { tool: "SubAgent", output: "错误: SubAgentSystem 未注入，请确保 bootstrap 已完成 DI 装配。" };
+  }
+
   try {
-    const result = await subAgentSystem.spawn({
+    const result = await _subAgentSystem.spawn({
       task,
       label,
       runTimeoutSeconds,

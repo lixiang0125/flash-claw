@@ -1,9 +1,6 @@
 import { Database } from "bun:sqlite";
 import path from "path";
 import fs from "fs";
-import { chatEngine } from "../chat";
-import { taskScheduler } from "../tasks";
-import { feishuBot } from "../integrations/feishu";
 
 export interface HeartbeatCheck {
   name: string;
@@ -27,10 +24,33 @@ interface HealthCheckResult {
   message: string;
 }
 
-class HeartbeatSystem {
+/**
+ * DI interfaces — HeartbeatSystem no longer hard-imports other modules.
+ * Dependencies are injected via setter methods after construction.
+ */
+interface ChatEngineAPI {
+  chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+}
+
+interface TaskSchedulerAPI {
+  listTasks(): { enabled: boolean; nextRun?: string }[];
+  getLastChatId(): string | null;
+}
+
+interface FeishuBotAPI {
+  getStatus?(): { connected: boolean };
+  notify?(chatId: string, message: string): Promise<void>;
+}
+
+export class HeartbeatSystem {
   private db: InstanceType<typeof Database>;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private heartbeatFile: string;
+
+  /* ── DI fields ── */
+  private chatEngineAPI: ChatEngineAPI | null = null;
+  private taskSchedulerAPI: TaskSchedulerAPI | null = null;
+  private feishuBotAPI: FeishuBotAPI | null = null;
 
   constructor(db?: InstanceType<typeof Database>) {
     const customDbPath = process.env.HEARTBEAT_DB_PATH;
@@ -48,7 +68,24 @@ class HeartbeatSystem {
     
     this.heartbeatFile = path.join(process.cwd(), "HEARTBEAT.md");
     this.initTables();
-    this.start();
+    // NOTE: No auto-start. Call start() after DI wiring is complete.
+  }
+
+  /* ── DI setters ── */
+
+  setChatEngine(engine: ChatEngineAPI): void {
+    this.chatEngineAPI = engine;
+    console.log("[HeartbeatSystem] ChatEngine attached");
+  }
+
+  setTaskScheduler(scheduler: TaskSchedulerAPI): void {
+    this.taskSchedulerAPI = scheduler;
+    console.log("[HeartbeatSystem] TaskScheduler attached");
+  }
+
+  setFeishuBot(bot: FeishuBotAPI): void {
+    this.feishuBotAPI = bot;
+    console.log("[HeartbeatSystem] FeishuBot attached");
   }
 
   private initTables(): void {
@@ -182,8 +219,13 @@ class HeartbeatSystem {
   async runCheck(check: HeartbeatCheck): Promise<HeartbeatResult | null> {
     console.log(`[Heartbeat] Running check: ${check.name}`);
 
+    if (!this.chatEngineAPI) {
+      console.error("[Heartbeat] ChatEngine not injected, skipping check");
+      return null;
+    }
+
     try {
-      const result = await chatEngine.chat({
+      const result = await this.chatEngineAPI.chat({
         message: check.description,
         sessionId: "heartbeat",
       });
@@ -237,7 +279,7 @@ class HeartbeatSystem {
 
     // 检查 Feishu 连接状态
     try {
-      const feishuStatus = feishuBot?.getStatus?.();
+      const feishuStatus = this.feishuBotAPI?.getStatus?.();
       if (!feishuStatus?.connected) {
         results.push({
           name: "Feishu连接",
@@ -261,7 +303,7 @@ class HeartbeatSystem {
 
     // 检查最近任务执行情况
     try {
-      const tasks = taskScheduler.listTasks();
+      const tasks = this.taskSchedulerAPI?.listTasks() ?? [];
       const now = new Date();
       const missedTasks = tasks.filter((t) => {
         if (!t.enabled || !t.nextRun) return false;
@@ -271,7 +313,7 @@ class HeartbeatSystem {
         results.push({
           name: "任务执行",
           status: "warning",
-          message: `${missedTasks.length} 个任务错 过执行时间`,
+          message: `${missedTasks.length} 个任务错过执行时间`,
         });
       } else {
         results.push({
@@ -313,7 +355,7 @@ class HeartbeatSystem {
   async notify(results: HeartbeatResult[]): Promise<void> {
     if (results.length === 0) return;
 
-    const lastChatId = taskScheduler.getLastChatId();
+    const lastChatId = this.taskSchedulerAPI?.getLastChatId() ?? null;
     if (!lastChatId) {
       console.log("[Heartbeat] No chat ID available for notification");
       return;
@@ -325,7 +367,7 @@ class HeartbeatSystem {
     const message = this.formatNotification(errorResults);
 
     try {
-      await feishuBot?.notify?.(lastChatId, message);
+      await this.feishuBotAPI?.notify?.(lastChatId, message);
       console.log("[Heartbeat] Notification sent to Feishu");
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : "Unknown error";
@@ -411,5 +453,3 @@ class HeartbeatSystem {
     };
   }
 }
-
-export const heartbeatSystem = new HeartbeatSystem();

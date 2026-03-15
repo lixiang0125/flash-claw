@@ -296,6 +296,44 @@ ${summary}
 
 
   /**
+   * Get daily logs since a specific date (exclusive), capped at maxDays.
+   * Used for incremental consolidation — only reads logs that were created
+   * after the last consolidation date, avoiding redundant re-processing.
+   *
+   * @param sinceDate  ISO date string (YYYY-MM-DD), exclusive lower bound.
+   *                   If null, falls back to getDailyLogs(maxDays).
+   * @param maxDays    Maximum number of days to look back (default: 7).
+   * @returns Array of log file contents, most recent first.
+   */
+  async getDailyLogsSince(sinceDate: string | null, maxDays = 7): Promise<string[]> {
+    if (!sinceDate) return this.getDailyLogs(maxDays);
+    if (!this.config.workspacePath) return [];
+
+    const memoryDir = path.join(this.config.workspacePath, "memory");
+    const logs: string[] = [];
+    const now = new Date();
+
+    for (let i = 0; i < maxDays; i++) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split("T")[0]!;
+
+      // Skip dates at or before the last consolidation
+      if (dateStr <= sinceDate) break;
+
+      const logPath = path.join(memoryDir, `${dateStr}.md`);
+      try {
+        const content = await fs.readFile(logPath, "utf-8");
+        logs.push(content);
+      } catch {
+        // File does not exist for this date
+      }
+    }
+
+    return logs;
+  }
+
+  /**
    * Read the full content of MEMORY.md.
    */
   async readMemoryFile(): Promise<string> {

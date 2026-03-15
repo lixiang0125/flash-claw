@@ -1,11 +1,15 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
-import { chatEngine } from "../chat";
 import type { EvolutionPlan } from "./evolution_planner";
 import type { FeedbackAnalysis } from "./feedback_analyzer";
 import { validateWritePath } from "../infra/fs/boundary";
 
 const EVOLUTION_LOG = join(process.cwd(), "evolution.log");
+
+/** Minimal ChatEngine interface required by the evolve() orchestrator. */
+interface ChatEngineAPI {
+  chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+}
 
 interface EvolutionResult {
   success: boolean;
@@ -103,10 +107,11 @@ export async function verifyEvolution(plan: EvolutionPlan): Promise<boolean> {
 
 export async function evolve(
   analysis: FeedbackAnalysis,
+  chatEngine: ChatEngineAPI,
   options: EvolutionOptions = {}
 ): Promise<EvolutionResult> {
   const { generateEvolutionPlan } = await import("./evolution_planner");
-  const plan = await generateEvolutionPlan(analysis);
+  const plan = await generateEvolutionPlan(analysis, chatEngine);
 
   if (!plan) {
     return {
