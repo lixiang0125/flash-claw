@@ -175,11 +175,12 @@ describe("TaskScheduler", () => {
       resolve!(); await p;
     });
 
-    it("无 executor 抛出", async () => {
+    it("无 executor 返回失败", async () => {
       const ts = makeTempScheduler();
       const t = ts.createTask({ name: "N", message: "m", schedule: "every:60000", enabled: true });
-      try { await ts.runTask(t.id); expect(true).toBe(false); }
-      catch (e: any) { expect(e.message).toContain("executor"); }
+      const run = await ts.runTask(t.id);
+      expect(run.status).toBe("failed");
+      expect(run.error).toContain("executor");
     });
 
     it("不存在 → not found", async () => {

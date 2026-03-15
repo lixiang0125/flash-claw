@@ -1,5 +1,51 @@
 # Changelog
 
+## 2025-03-16 (20)
+
+### README 全量更新 + 预已存在测试修复
+
+**README.md 全量重写（753 行）**
+- 按照项目实际能力全量更新所有章节
+- 新增自进化系统详细说明（工作原理、架构、配置）
+- 更新 DI 容器服务列表（24 个 Token，含 EVOLUTION_ENGINE）
+- 更正工具数量为 8 个内置工具
+- 删除已不存在的 `core/agent/` 目录引用
+- 更新项目结构树反映最新目录布局
+
+**修复预已存在测试问题**
+- 删除 `tools/legacy-adapter.ts`：引用了已不存在的 `TOOLS`/`executeTool` 导出，导致模块加载 SyntaxError
+- 清理 `bootstrap.ts` 中对 legacy-adapter 的 import 和调用
+- 修复 `tasks.test.ts` "无 executor 抛出" 测试：runTask 实际返回 `{status: "failed"}` 而非抛出异常
+
+**验证**: 217 pass / 4 skip / 0 fail，零失败
+
+## 2025-03-16 (19)
+
+### 自进化系统（Evolution Engine）
+
+全新实现 evolution 自进化模块，为 FlashClaw 提供对话质量自动优化能力（+979 行）：
+
+**新增文件（5 个）**
+- `evolution/types.ts`: 类型定义（FeedbackSignal、FeedbackAnalysis、EvolutionStrategy、EvolutionReport）
+- `evolution/feedback-analyzer.ts`: 双引擎反馈分析器（规则引擎快速检测 + LLM 深度分析，LRU 缓存）
+- `evolution/strategy-planner.ts`: 策略规划器（LLM 生成改进策略 + 规则回退，持久化到 EVOLUTION.md）
+- `evolution/evolution-engine.ts`: 进化引擎核心（异步分析、策略管理、自动规划触发、效果追踪）
+- `evolution/index.ts`: barrel 导出
+
+**DI 集成**
+- `tokens.ts`: 新增 IEvolutionEngine 接口 + EVOLUTION_ENGINE ServiceToken
+- `bootstrap.ts`: 注册 EVOLUTION_ENGINE（Singleton，依赖 LOGGER + CONFIG），wire 到 ChatEngine
+- `engine.ts`: 新增 setEvolutionEngine() 注入、chat() 中异步反馈分析、buildSystemPrompt() 中进化策略注入
+
+**核心能力**
+- 对话反馈自动分析：6 种信号（positive/negative/neutral/confused/frustrated/repeated_request）
+- 自我改进规划：累积反馈达阈值自动生成改进策略
+- 进化策略注入：活跃策略自动合并到 system prompt
+- Markdown 持久化：策略和历史记录写入 data/workspace/EVOLUTION.md
+- 效果追踪：低效策略自动淘汰（应用次数 > 20 且效果 < 0.3）
+
+**验证**: 214 pass / 4 skip / 0 fail（含预已存在测试问题），零回归
+
 ## 2025-03-15 (18)
 
 ### 无用代码清理（-2,024 行）

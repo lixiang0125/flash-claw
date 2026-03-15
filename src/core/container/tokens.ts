@@ -31,11 +31,16 @@ import type {
   SandboxInstance,
   ExecResult,
 } from "../../tools/sandbox/sandbox-types";
+import type {
+  EvolutionStrategy,
+  EvolutionReport,
+} from "../../evolution/types";
 
 // Re-export so consumers can import from tokens
 export type { ConversationMessage } from "../../memory/working-memory";
 export type { UserProfile } from "../../memory/user-profile";
 export type { MemoryEntry, MemoryQuery, MemorySearchResult, IncomingMessage } from "../../memory/mem0-memory-manager";
+export type { EvolutionStrategy, EvolutionReport } from "../../evolution/types";
 
 /**
  * 应用程序全局配置接口。
@@ -655,6 +660,7 @@ export interface IChatEngine {
     tool_call_id?: string;
     name?: string;
   }>;
+  setEvolutionEngine(engine: IEvolutionEngine): void;
 }
 
 /**
@@ -871,6 +877,34 @@ export interface IMarkdownMemory {
  */
 export const MARKDOWN_MEMORY: ServiceToken<IMarkdownMemory> =
   createToken<IMarkdownMemory>("MARKDOWN_MEMORY");
+
+/**
+ * 自进化引擎接口。
+ * 分析对话反馈并自动优化系统行为，支持异步反馈分析、策略生成和 prompt 增强。
+ *
+ * @interface IEvolutionEngine
+ */
+export interface IEvolutionEngine {
+  /** 分析一次对话的反馈（异步，不阻塞主流程） */
+  analyzeFeedback(userMessage: string, assistantResponse: string, sessionId: string): Promise<void>;
+  /** 获取当前活跃的进化策略列表 */
+  getActiveStrategies(): EvolutionStrategy[];
+  /** 获取 prompt 补充指令（合并所有活跃策略的 promptAdjustment） */
+  getPromptEnhancements(): string;
+  /** 获取进化报告 */
+  getReport(): Promise<EvolutionReport>;
+  /** 手动触发进化规划（通常由反馈累积自动触发） */
+  planEvolution(): Promise<void>;
+}
+
+/**
+ * 自进化引擎服务令牌。
+ * 用于从依赖注入容器中获取 IEvolutionEngine 实例。
+ *
+ * @const {ServiceToken<IEvolutionEngine>}
+ */
+export const EVOLUTION_ENGINE: ServiceToken<IEvolutionEngine> =
+  createToken<IEvolutionEngine>("EVOLUTION_ENGINE");
 
 /**
  * HTTP 服务应用接口。

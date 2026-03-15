@@ -6,6 +6,7 @@ import { cronToHumanReadable } from "./parsers";
 import type { ChatRequest, ChatResponse } from "./types";
 import { ErrorSanitizer } from "../infra/error-handler";
 import type { WorkingMemory, ConversationMessage } from "../memory/working-memory";
+import type { IEvolutionEngine } from "../core/container/tokens";
 
 const MAX_STEPS = 10;
 
@@ -53,6 +54,9 @@ export class ChatEngine {
    */
   private workingMemory: WorkingMemory | null = null;
 
+  /** 自进化引擎 —— 分析对话反馈并自动优化系统行为 */
+  private evolutionEngine: IEvolutionEngine | null = null;
+
   constructor() {
     const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
     const apiKey = process.env.OPENAI_API_KEY || "";
@@ -83,6 +87,12 @@ export class ChatEngine {
   setWorkingMemory(wm: WorkingMemory): void {
     this.workingMemory = wm;
     console.log("[ChatEngine] WorkingMemory attached (single source of truth)");
+  }
+
+  /** 注入自进化引擎，用于对话反馈分析和 prompt 增强 */
+  setEvolutionEngine(engine: IEvolutionEngine): void {
+    this.evolutionEngine = engine;
+    console.log("[ChatEngine] EvolutionEngine attached");
   }
 
   setTools(tools: any[]): void {
@@ -243,6 +253,12 @@ export class ChatEngine {
         }
       }
 
+      // 异步进化分析（不阻塞主流程）
+      if (this.evolutionEngine) {
+        this.evolutionEngine.analyzeFeedback(message, lastResponse, sessionId)
+          .catch(err => console.error("[ChatEngine] Evolution analysis failed:", err));
+      }
+
       return {
         response: lastResponse,
         sessionId,
@@ -305,6 +321,12 @@ export class ChatEngine {
     ].join("\n");
 
     prompt += `\n\n${toolDescriptions}`;
+
+    // 注入自进化策略的 prompt 增强指令
+    const evolutionHints = this.evolutionEngine?.getPromptEnhancements() || "";
+    if (evolutionHints) {
+      prompt += `\n\n## 行为优化指令\n${evolutionHints}`;
+    }
 
     return prompt;
   }

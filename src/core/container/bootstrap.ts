@@ -24,6 +24,7 @@ import {
   CONTEXT_BUDGET,
   PROMPT_BUILDER,
   MARKDOWN_MEMORY,
+  EVOLUTION_ENGINE,
   type AppConfig,
   type Logger,
   type Database,
@@ -57,7 +58,6 @@ import { globTool } from "../../tools/builtin/glob";
 import { grepTool } from "../../tools/builtin/grep";
 import { webSearchTool } from "../../tools/builtin/web-search";
 import { webFetchTool } from "../../tools/builtin/web-fetch";
-import { adaptLegacyTools } from "../../tools/legacy-adapter";
 import { ChatEngine } from "../../chat/engine";
 import { FeishuBot } from "../../integrations/feishu";
 import { TaskScheduler } from "../../tasks";
@@ -76,6 +76,7 @@ import { Mem0MemoryManager } from "../../memory/mem0-memory-manager";
 import { createMem0Memory } from "../../memory/mem0-factory";
 import { ContextBudget } from "../../memory/context-budget";
 import { MarkdownMemory } from "../../memory/markdown-memory";
+import { EvolutionEngine } from "../../evolution";
 import { DailySummarizer } from "../../memory/daily-summarizer";
 import { SecurityLayer } from "../../security/security-layer";
 import { PromptBuilder } from "../../agent/prompt-builder";
@@ -98,6 +99,7 @@ export {
   HEARTBEAT_SYSTEM,
   SUB_AGENT_SYSTEM,
   HTTP_SERVER,
+  EVOLUTION_ENGINE,
 };
 export type {
   AppConfig,
@@ -294,11 +296,6 @@ export function createContainer(): Container {
       // Register web_fetch (already exists in builtin but was not wired up)
       registry.register(webFetchTool);
 
-      // Adapt and register legacy-only tools (FeishuDoc, FeishuDrive, etc.)
-      // See src/tools/legacy-adapter.ts for details on the adaptation strategy
-      for (const legacyTool of adaptLegacyTools()) {
-        registry.register(legacyTool);
-      }
       return registry;
     },
   });
@@ -427,6 +424,17 @@ export function createContainer(): Container {
         markdownMemory as MarkdownMemory,
         userProfile as UserProfileService,
       );
+    },
+  });
+
+  // 自进化引擎（依赖 LOGGER 和 CONFIG）
+  container.register({
+    token: EVOLUTION_ENGINE,
+    lifecycle: Lifecycle.Singleton,
+    factory: (resolver) => {
+      const logger = resolver.resolve(LOGGER);
+      const config = resolver.resolve(CONFIG);
+      return new EvolutionEngine(logger, config);
     },
   });
 
@@ -635,6 +643,11 @@ export async function bootstrap(): Promise<Container> {
     sa.setChatEngine(ce);
     setSubAgentSystem(sa);
     tsLogger.info("SubAgentSystem DI wired");
+
+    // 注入自进化引擎到 ChatEngine
+    const evo = container.resolve(EVOLUTION_ENGINE);
+    ce.setEvolutionEngine(evo);
+    tsLogger.info("EvolutionEngine DI wired to ChatEngine");
   } catch (err) {
     const logger = container.resolve(LOGGER);
     logger.error("TaskScheduler wiring failed (non-fatal)", { err });
