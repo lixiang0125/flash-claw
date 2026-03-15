@@ -1,5 +1,8 @@
 # Flash Claw
 
+[![CI](https://github.com/lixiang0125/flash-claw/actions/workflows/ci.yml/badge.svg)](https://github.com/lixiang0125/flash-claw/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/lixiang0125/flash-claw/branch/main/graph/badge.svg)](https://codecov.io/gh/lixiang0125/flash-claw)
+
 基于 Hono + Bun + OpenAI SDK 的 AI 对话引擎，支持 Skill 执行系统和工具执行能力。
 
 ## 技术栈
