@@ -1,5 +1,34 @@
 # Changelog
 
+## 2025-03-15 (18)
+
+### 无用代码清理（-2,024 行）
+
+全面审查项目代码，删除 14 个无用文件和冗余代码，净减 2,024 行：
+
+**删除的文件（14 个）**
+- `tools/webfetch.ts`: 空文件（0 字节）
+- `core/agent/index.ts`: 仅含占位注释，无引用
+- `core/index.ts`: 死 barrel 文件，src/index.ts 直接 import bootstrap
+- `config/env.ts`: Zod 环境验证（42 行），已被 bootstrap.ts 自有 config 替代
+- `memory/legacy.ts`: 旧记忆系统（156 行），无外部引用
+- `memory/db-adapter.ts`: 数据库适配器（42 行），无外部消费者
+- `memory/embedding/ollama-provider.ts`: Ollama embedding 提供者（92 行），未被使用
+- `memory/embedding/transformers-provider.ts`: Transformers 提供者（67 行），未被使用
+- `subagents/analyzer.ts`: 复杂度分析器（257 行），无外部引用
+- `profiles/index.ts`: userProfileStore（34 行），唯一消费者 tools/index.ts 已精简
+- `evolution/` 整个目录（321 行）: 自进化模块，无外部引用
+
+**代码精简**
+- `tools/index.ts`: 从 1,017 行精简至 18 行（-999 行），仅保留 setSubAgentSystem
+- `infra/error-handler.ts`: 移除未使用的 randomUUID import
+
+**依赖统一**
+- 7 个文件的 Logger import 从 embedding-service.ts 统一到 core/container/tokens.ts
+- embedding-service.ts 的 Logger export 改为内部接口
+
+**验证**: 213 pass / 4 skip / 1 pre-existing fail，零回归
+
 ## 2025-03-15 (17)
 
 ### 全量 API 文档补充（JSDoc/TSDoc 中文注释）

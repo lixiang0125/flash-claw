@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import type { DatabaseService } from "../short-term-memory";
 import type { EmbeddingProvider, IEmbeddingService } from "./types";
 
-export interface Logger {
+interface Logger {
   debug(message: string, meta?: Record<string, unknown>): void;
   info(message: string, meta?: Record<string, unknown>): void;
   warn(message: string, meta?: Record<string, unknown>): void;

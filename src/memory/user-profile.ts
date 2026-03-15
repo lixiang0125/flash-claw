@@ -1,5 +1,5 @@
 import type { DatabaseService } from "./short-term-memory";
-import type { Logger } from "./embedding/embedding-service";
+import type { Logger } from "../core/container/tokens";
 
 export interface UserProfile {
   userId: string;

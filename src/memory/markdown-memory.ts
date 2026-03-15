@@ -17,7 +17,7 @@
  */
 import * as fs from "fs/promises";
 import * as path from "path";
-import type { Logger } from "./embedding/embedding-service";
+import type { Logger } from "../core/container/tokens";
 
 /**
  * Markdown 记忆配置选项。

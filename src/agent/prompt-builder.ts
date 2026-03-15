@@ -2,7 +2,7 @@ import type { ConversationMessage } from "../memory/working-memory";
 import type { MemoryEntry } from "../memory/long-term-memory";
 import type { ContextBudget } from "../memory/context-budget";
 import type { IMemoryManager } from "../memory/memory-manager";
-import type { Logger } from "../memory/embedding/embedding-service";
+import type { Logger } from "../core/container/tokens";
 
 export interface AgentContext {
   user: {

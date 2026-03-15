@@ -8,7 +8,6 @@ export {
 export { MemoryManager, type IMemoryManager, type IncomingMessage } from "./memory-manager";
 export { ContextBudget, type ContextBudgetConfig } from "./context-budget";
 export { UserProfileService, type UserProfile } from "./user-profile";
-export { createDatabaseAdapter } from "./db-adapter";
 export { MarkdownMemory, type MarkdownMemoryConfig, type MemoryFileResult } from "./markdown-memory";
 export { Mem0MemoryManager } from "./mem0-memory-manager";
 export type {

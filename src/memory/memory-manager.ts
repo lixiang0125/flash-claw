@@ -2,7 +2,7 @@ import { WorkingMemory, type ConversationMessage } from "./working-memory";
 import { ShortTermMemory } from "./short-term-memory";
 import { LongTermMemory, type MemoryEntry, type MemoryQuery, type MemorySearchResult } from "./long-term-memory";
 import { UserProfileService, type UserProfile } from "./user-profile";
-import type { Logger } from "./embedding/embedding-service";
+import type { Logger } from "../core/container/tokens";
 import * as fs from "fs/promises";
 import * as path from "path";
 
