@@ -50,7 +50,7 @@ describe("TaskScheduler", () => {
       fs.writeFileSync(fp, JSON.stringify(existing));
       const ts = new TaskScheduler(fp);
       expect(ts.listTasks()).toHaveLength(1);
-      expect(ts.listTasks()[0].id).toBe("existing-1");
+      expect(ts.listTasks()[0]!.id).toBe("existing-1");
     });
   });
 
@@ -107,7 +107,7 @@ describe("TaskScheduler", () => {
       ts.createTask({ name: "First", message: "m", schedule: "every:10000", enabled: true });
       await new Promise(r => setTimeout(r, 15));
       ts.createTask({ name: "Second", message: "m", schedule: "every:20000", enabled: true });
-      expect(ts.listTasks()[0].name).toBe("Second");
+      expect(ts.listTasks()[0]!.name).toBe("Second");
     });
 
     it("按 id 查找", () => {

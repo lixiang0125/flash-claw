@@ -39,8 +39,8 @@ class EmbeddingCache {
       this.cache.delete(key);
     } else if (this.cache.size >= this.maxSize) {
       // Evict oldest entry
-      const oldest = this.cache.keys().next().value
-      this.cache.delete(oldest);
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
     }
     this.cache.set(key, value);
   }

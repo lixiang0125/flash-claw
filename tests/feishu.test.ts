@@ -68,7 +68,7 @@ describe("FeishuBot DI", () => {
     expect(mockEngine.chat).toHaveBeenCalled();
     expect(sendSpy).toHaveBeenCalled();
     if (sendSpy.mock.calls.length > 0) {
-      expect(sendSpy.mock.calls[0][0]).toBe("test_chat");
+      expect(sendSpy.mock.calls[0]![0]).toBe("test_chat");
     }
   });
 
@@ -111,7 +111,7 @@ describe("FeishuBot DI", () => {
     });
 
     expect(sendSpy).toHaveBeenCalled();
-    const callArgs = sendSpy.mock.calls[0];
+    const callArgs = sendSpy.mock.calls[0]!;
     expect(callArgs[0]).toBe("chat_abc");
     expect(callArgs[2]).toBe("回复内容");
   });

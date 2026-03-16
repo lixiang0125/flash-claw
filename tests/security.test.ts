@@ -312,7 +312,7 @@ describe("SecurityLayer", () => {
 
       const blockedLogs = security.getAuditLog({ allowed: false });
       expect(blockedLogs.length).toBe(1);
-      expect(blockedLogs[0].detail).toBe("/etc/passwd");
+      expect(blockedLogs[0]!.detail).toBe("/etc/passwd");
     });
 
     test("returns empty array when no entries match filter", () => {
