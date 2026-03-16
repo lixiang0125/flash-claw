@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-03-16 (25)
+
+### fix: 飞书流式路径缺失任务调度解析 — 定时提醒功能在流式模式下失效
+
+**问题**：用户在飞书发送"提醒我三分钟后喝水"等任务调度请求时，FlashClaw 回复"我无法设置定时提醒"，而非创建定时任务。
+
+**根因**：`chatStream()` 方法遗漏了 `parseAndScheduleTask()` 调用。飞书消息默认走流式路径 `handleMessageStreaming()` → `chatStream()`，而只有非流式 `chat()` 方法包含任务调度解析逻辑。加之系统提示词未告知 LLM 具备调度能力，LLM 按常识判断自己无法设提醒。
+
+**修复**：在 `chatStream()` 的 Phase 0 加入 `parseAndScheduleTask()` 调用，并将任务创建结果注入 LLM 上下文（与 `chat()` 逻辑对齐）。
+
+**修改文件（1 个）**
+
+- `src/chat/engine.ts`: `chatStream()` 新增 Phase 0 任务调度意图解析，创建成功后通过 system message 通知 LLM 确认
+
 ## 2026-03-16 (24)
 
 ### perf: 端到端性能优化 — embedding 缓存 + memory 超时保护 + 计时埋点
@@ -789,6 +803,20 @@ MEM0_EMBEDDING_MODEL=text-embedding-v3
 - vector_store.db
 
 # Changelog
+
+## 2026-03-16 (25)
+
+### fix: 飞书流式路径缺失任务调度解析 — 定时提醒功能在流式模式下失效
+
+**问题**：用户在飞书发送"提醒我三分钟后喝水"等任务调度请求时，FlashClaw 回复"我无法设置定时提醒"，而非创建定时任务。
+
+**根因**：`chatStream()` 方法遗漏了 `parseAndScheduleTask()` 调用。飞书消息默认走流式路径 `handleMessageStreaming()` → `chatStream()`，而只有非流式 `chat()` 方法包含任务调度解析逻辑。加之系统提示词未告知 LLM 具备调度能力，LLM 按常识判断自己无法设提醒。
+
+**修复**：在 `chatStream()` 的 Phase 0 加入 `parseAndScheduleTask()` 调用，并将任务创建结果注入 LLM 上下文（与 `chat()` 逻辑对齐）。
+
+**修改文件（1 个）**
+
+- `src/chat/engine.ts`: `chatStream()` 新增 Phase 0 任务调度意图解析，创建成功后通过 system message 通知 LLM 确认
 
 ## 2026-03-16 (24)
 

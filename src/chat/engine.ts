@@ -427,6 +427,9 @@ export class ChatEngine {
     const t0 = Date.now();
 
     try {
+      // ── Phase 0: 任务调度意图解析（与 memory 并行） ──
+      const taskResult = await this.parseAndScheduleTask(message, sessionId);
+
       // ── Phase 1: 记忆检索 (带超时保护，不阻塞 LLM) ──
       const MEMORY_TIMEOUT_MS = 800; // 超时 800ms 则跳过记忆
       let relevantMemories = "";
@@ -474,7 +477,14 @@ export class ChatEngine {
         ...history,
         { role: "user", content: message },
       ];
-      console.log(`[chatStream] ⏱ prompt build=${Date.now() - tPrompt}ms, context msgs=${messages.length}`);
+      // If a task was created, inject it so the LLM acknowledges it
+      if (taskResult) {
+        messages.push({
+          role: "system",
+          content: `[System] 用户的消息已被识别为任务调度请求，已自动创建: ${taskResult}\n请在回复中确认任务创建成功，并告知用户任务详情。`,
+        });
+      }
+      console.log(`[chatStream] ⏱ prompt build=${Date.now() - tPrompt}ms, context msgs=${messages.length}${taskResult ? ", task created" : ""}`);
 
       // ── Phase 3: 流式 LLM 调用 ──
       const tLLM = Date.now();
