@@ -2,6 +2,14 @@ import "dotenv/config";
 import { bootstrap, HTTP_SERVER, CONFIG, LOGGER } from "./core/container/bootstrap";
 import { serve } from "bun";
 
+/* ── 全局异常兜底，防止进程意外退出 ── */
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled rejection:", reason);
+});
+
 async function main() {
   console.log("[Bootstrap] Starting FlashClaw with DI container...");
   
@@ -27,4 +35,7 @@ async function main() {
   console.log(`[Bootstrap] Server listening on port ${config.port}`);
 }
 
-main();
+main().catch((err) => {
+  console.error("[FATAL] main() crashed:", err);
+  process.exit(1);
+});
