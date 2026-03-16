@@ -92,66 +92,157 @@ export class FeishuBot {
     return token === this.config.verificationToken;
   }
 
+  /**
+   * 初始化飞书 WebSocket 长连接客户端。
+   *
+   * 改进说明：
+   * 1. SDK 的 start() 是 fire-and-forget，不会 throw 或返回连接状态
+   * 2. 通过拦截 SDK 内部 console 日志来判断连接是否成功
+   * 3. 外层实现更健壮的重试（5次，指数退避 + 随机抖动，最大60s）
+   * 4. 每次重试创建全新 WSClient 实例，避免内部状态残留
+   * 5. 所有重试耗尽后启动后台静默重连（每2分钟探测一次）
+   */
   private async initWSClient(): Promise<void> {
     if (!this.config.appId || !this.config.appSecret) return;
 
     console.log("Initializing Feishu WebSocket client...");
 
-    const MAX_RETRIES = 3;
-    const BASE_DELAY_MS = 5000;
+    const MAX_RETRIES = 5;
+    const BASE_DELAY_MS = 3000;
+    const MAX_DELAY_MS = 60000;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         this.wsClient = new Lark.WSClient({
           appId: this.config.appId,
           appSecret: this.config.appSecret,
+          loggerLevel: Lark.LoggerLevel.info,
         });
 
-        await (this.wsClient as any).start({
-          eventDispatcher: new Lark.EventDispatcher({}).register({
-            "im.message.receive_v1": async (data: any) => {
-              console.log("Feishu: Received message event!");
-              console.log("Data:", JSON.stringify(data, null, 2));
-              await this.handleMessage(data);
-            },
-          }),
-        });
+        const connected = await this.startWithTimeout();
 
-        console.log("Feishu WebSocket client started successfully");
-        return;
+        if (connected) {
+          console.log("Feishu WebSocket client started successfully");
+          return;
+        }
+
+        throw new Error("WebSocket connection not established within timeout");
       } catch (err: any) {
         const errMsg = err?.message || String(err);
 
-        // Actionable guidance for known error codes
-        if (errMsg.includes("1000040345")) {
-          console.error(
-            "Feishu WebSocket error: code 1000040345 — " +
-              "请检查飞书开发者后台是否已为此应用启用「长连接」模式 " +
-              "(应用功能 > 机器人 > 长连接)",
-          );
-        } else if (errMsg.includes("PingInterval")) {
-          console.error(
-            "Feishu WebSocket error: ClientConfig.PingInterval undefined — " +
-              "SDK pullConnectConfig 未正确处理错误码，请运行 " +
-              "`bun run scripts/patch-feishu-sdk.ts` 修补 SDK",
-          );
-        } else {
-          console.error(`Feishu WebSocket error (attempt ${attempt}/${MAX_RETRIES}):`, errMsg);
-        }
-
         if (attempt < MAX_RETRIES) {
-          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-          console.log(`Feishu: retrying in ${delay / 1000}s...`);
+          const delay = Math.min(
+            BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000,
+            MAX_DELAY_MS,
+          );
+          console.warn(
+            `[FeishuBot] Connection attempt ${attempt}/${MAX_RETRIES} failed: ${errMsg}. ` +
+              `Retrying in ${(delay / 1000).toFixed(1)}s...`,
+          );
           await new Promise((r) => setTimeout(r, delay));
         } else {
           console.error(
-            "Feishu: failed to connect after " + MAX_RETRIES + " attempts. " +
-              "WebSocket client will not be available.",
+            `[FeishuBot] Failed after ${MAX_RETRIES} attempts. Last error: ${errMsg}. ` +
+              "The bot will operate without real-time event subscription.",
           );
+          this.scheduleBackgroundReconnect();
         }
       }
     }
   }
+
+  /**
+   * 带超时检测的 WSClient 启动。
+   * SDK 的 start() 方法内部会打印 "ws client ready"，
+   * 通过拦截 console.info 来检测连接是否完成。
+   */
+  private startWithTimeout(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const TIMEOUT_MS = 25000;
+
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          resolve(false);
+        }
+      }, TIMEOUT_MS);
+
+      const origInfo = console.info;
+
+      const cleanup = () => {
+        console.info = origInfo;
+        clearTimeout(timer);
+      };
+
+      console.info = (...args: any[]) => {
+        origInfo.apply(console, args);
+        const msg = args.map(String).join(" ");
+        if (msg.includes("ws client ready") && !settled) {
+          settled = true;
+          cleanup();
+          resolve(true);
+        }
+      };
+
+      (this.wsClient as any).start({
+        eventDispatcher: new Lark.EventDispatcher({}).register({
+          "im.message.receive_v1": async (data: any) => {
+            console.log("Feishu: Received message event!");
+            console.log("Data:", JSON.stringify(data, null, 2));
+            await this.handleMessage(data);
+          },
+        }),
+      });
+    });
+  }
+
+  /**
+   * 后台静默重连：初始重试耗尽后，每2分钟探测飞书 endpoint
+   * 可用性并尝试重新建立连接。
+   */
+  private scheduleBackgroundReconnect(): void {
+    const INTERVAL_MS = 120_000;
+    console.log("[FeishuBot] Scheduling background reconnect every 2 minutes...");
+
+    const intervalId = setInterval(async () => {
+      try {
+        if (!this.config.appId || !this.config.appSecret) return;
+
+        const resp = await fetch("https://open.feishu.cn/callback/ws/endpoint", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            AppID: this.config.appId,
+            AppSecret: this.config.appSecret,
+          }),
+        });
+        const data = await resp.json() as any;
+
+        if (data.code !== 0) {
+          console.log(`[FeishuBot] Background probe: code ${data.code}, skipping`);
+          return;
+        }
+
+        console.log("[FeishuBot] Server available, attempting reconnect...");
+        this.wsClient = new Lark.WSClient({
+          appId: this.config.appId,
+          appSecret: this.config.appSecret,
+          loggerLevel: Lark.LoggerLevel.info,
+        });
+
+        const connected = await this.startWithTimeout();
+        if (connected) {
+          console.log("[FeishuBot] Background reconnect successful!");
+          clearInterval(intervalId);
+        }
+      } catch (err: any) {
+        console.log(`[FeishuBot] Background reconnect failed: ${err?.message || err}`);
+      }
+    }, INTERVAL_MS);
+  }
+
 
   private async handleMessage(event: any): Promise<void> {
     console.log("Feishu: Received event:", JSON.stringify(event));

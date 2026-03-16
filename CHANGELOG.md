@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-16 (22)
+
+### fix: 增强飞书 WebSocket 重连机制与端口配置
+
+**问题**: 飞书服务端间歇性返回 `1000040345` (system busy)，SDK 内部重试机制在 start 阶段仅尝试 2 次后放弃，且 `start()` 方法是 fire-and-forget 模式（不返回连接状态），外层 try/catch 无法感知连接失败。
+
+**修复内容**:
+
+1. **`initWSClient()` 重写** (`src/integrations/feishu.ts`):
+   - 重试策略：5 次重试，指数退避 + 随机抖动，最大间隔 60s
+   - 每次重试创建全新 WSClient 实例，避免内部状态残留
+   - 所有重试耗尽后启动后台静默重连（每 2 分钟探测一次）
+
+2. **新增 `startWithTimeout()` 方法**:
+   - 通过拦截 SDK 内部 `console.info` 日志检测 `"ws client ready"` 信号
+   - 25 秒超时保护，确保不会无限等待
+   - 连接完成后自动恢复原始 console 方法
+
+3. **新增 `scheduleBackgroundReconnect()` 方法**:
+   - 先用 HTTP 探测 `/callback/ws/endpoint` 可用性
+   - 仅在服务端返回 `code: 0` 时才尝试 WebSocket 重连
+   - 成功连接后自动停止定时器
+
+4. **端口配置** (`.env`):
+   - 新增 `PORT=3090` 环境变量，避免与其他服务的 3000 端口冲突
+
+
 ## 2026-03-16 (21)
 
 ### fix: 修复飞书 WebSocket 连接错误处理

@@ -95,10 +95,10 @@ bun run start
 
 ```bash
 # 健康检查
-curl http://localhost:3000/health
+curl http://localhost:3090/health
 
 # 发送对话
-curl -X POST http://localhost:3000/api/chat \
+curl -X POST http://localhost:3090/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "你好，介绍一下你自己"}'
 ```
@@ -465,7 +465,8 @@ Flash-Claw 支持两种飞书接入模式：
 ### WebSocket 长连接模式
 
 - 基于飞书开放平台 WebSocket 协议
-- 自动重连、心跳保活
+- 多层重试策略：5 次指数退避 + 后台静默重连（每 2 分钟）
+- 连接状态检测：通过 SDK 日志拦截自动判断连接成功/失败
 - 适合高实时性场景
 
 ### 配置
@@ -708,7 +709,7 @@ flash-claw/
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `PORT` | HTTP 服务端口 | `3000` |
+| `PORT` | HTTP 服务端口 | `3090` |
 | `HOST` | 绑定地址 | `0.0.0.0` |
 
 ### 安全
