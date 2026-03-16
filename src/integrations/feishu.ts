@@ -92,38 +92,65 @@ export class FeishuBot {
     return token === this.config.verificationToken;
   }
 
-  private initWSClient(): void {
+  private async initWSClient(): Promise<void> {
     if (!this.config.appId || !this.config.appSecret) return;
 
-    const client = new Lark.Client({
-      appId: this.config.appId,
-      appSecret: this.config.appSecret,
-    });
-
-    this.wsClient = new Lark.WSClient({
-      appId: this.config.appId,
-      appSecret: this.config.appSecret,
-    });
-
     console.log("Initializing Feishu WebSocket client...");
-    console.log("App ID:", this.config.appId);
 
-    (this.wsClient as any).start({
-      eventDispatcher: new Lark.EventDispatcher({}).register({
-        "im.message.receive_v1": async (data: any) => {
-          console.log("Feishu: Received message event!");
-          console.log("Data:", JSON.stringify(data, null, 2));
-          await this.handleMessage(data);
-        },
-      }),
-      wsConfig: {
-        autoReconnect: true,
-      },
-    }).then(() => {
-      console.log("Feishu WebSocket client started successfully");
-    }).catch((err: any) => {
-      console.error("Feishu WebSocket error:", err);
-    });
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 5000;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        this.wsClient = new Lark.WSClient({
+          appId: this.config.appId,
+          appSecret: this.config.appSecret,
+        });
+
+        await (this.wsClient as any).start({
+          eventDispatcher: new Lark.EventDispatcher({}).register({
+            "im.message.receive_v1": async (data: any) => {
+              console.log("Feishu: Received message event!");
+              console.log("Data:", JSON.stringify(data, null, 2));
+              await this.handleMessage(data);
+            },
+          }),
+        });
+
+        console.log("Feishu WebSocket client started successfully");
+        return;
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+
+        // Actionable guidance for known error codes
+        if (errMsg.includes("1000040345")) {
+          console.error(
+            "Feishu WebSocket error: code 1000040345 — " +
+              "请检查飞书开发者后台是否已为此应用启用「长连接」模式 " +
+              "(应用功能 > 机器人 > 长连接)",
+          );
+        } else if (errMsg.includes("PingInterval")) {
+          console.error(
+            "Feishu WebSocket error: ClientConfig.PingInterval undefined — " +
+              "SDK pullConnectConfig 未正确处理错误码，请运行 " +
+              "`bun run scripts/patch-feishu-sdk.ts` 修补 SDK",
+          );
+        } else {
+          console.error(`Feishu WebSocket error (attempt ${attempt}/${MAX_RETRIES}):`, errMsg);
+        }
+
+        if (attempt < MAX_RETRIES) {
+          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+          console.log(`Feishu: retrying in ${delay / 1000}s...`);
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          console.error(
+            "Feishu: failed to connect after " + MAX_RETRIES + " attempts. " +
+              "WebSocket client will not be available.",
+          );
+        }
+      }
+    }
   }
 
   private async handleMessage(event: any): Promise<void> {

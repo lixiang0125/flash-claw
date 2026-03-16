@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-03-16 (21)
+
+### fix: 修复飞书 WebSocket 连接错误处理
+
+**问题**: `bun run start` 时飞书 WebSocket 连接失败，错误码 `1000040345` 导致 SDK 内部崩溃：
+- `code: 1000040345, system busy` — 服务端拒绝连接
+- `undefined is not an object (evaluating 'ClientConfig.PingInterval')` — SDK bug
+
+**根因**: `@larksuiteoapi/node-sdk` 的 `pullConnectConfig()` 函数仅对 `code === 1` (system_busy) 和 `code === 1000040343` (internal_error) 返回 false。对于未识别的错误码（如 1000040345），代码继续执行并尝试访问 `ClientConfig.PingInterval`，而此时 `ClientConfig` 为 undefined。
+
+**修复内容**:
+
+1. **SDK 补丁** (`scripts/patch-feishu-sdk.ts`):
+   - 修补 `pullConnectConfig()` 的错误处理逻辑
+   - 任何非零、非成功的错误码均返回 false，防止访问 undefined 对象
+   - 补丁幂等，可安全重复运行
+
+2. **feishu.ts `initWSClient()` 重写**:
+   - 移除未使用的 `const client = new Lark.Client(...)` 变量
+   - 移除无效的 `wsConfig: { autoReconnect: true }` 参数
+   - 移除 `console.log("App ID:", ...)` 安全隐患
+   - 添加指数退避重试机制（最多 3 次，起始 5 秒）
+   - 针对已知错误码提供可操作的错误提示：
+     - `1000040345`: 提示检查飞书开发者后台长连接配置
+     - `PingInterval undefined`: 提示运行 SDK 补丁脚本
+
+3. **postinstall 自动补丁**:
+   - `package.json` postinstall 脚本追加 `bun run scripts/patch-feishu-sdk.ts`
+   - `bun install` 后自动应用 SDK 补丁
+
+**验证**: 217 pass / 4 skip / 0 fail，零回归
+
+
 ## 2025-03-16 (20)
 
 ### README 全量更新 + 预已存在测试修复

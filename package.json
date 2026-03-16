@@ -14,7 +14,7 @@
     "test": "bun test",
     "test:run": "bun test --run",
     "typecheck": "tsc --noEmit",
-    "postinstall": "bun run scripts/patch-better-sqlite3.js"
+    "postinstall": "bun run scripts/patch-better-sqlite3.js && bun run scripts/patch-feishu-sdk.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
