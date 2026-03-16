@@ -424,51 +424,96 @@ export class ChatEngine {
     const { message, sessionId = "default", userId = "default" } = request;
     const history = this.getHistory(sessionId);
     const skills = this.getSessionSkills(sessionId);
+    const t0 = Date.now();
 
     try {
-      // 记忆检索
+      // ── Phase 1: 记忆检索 (带超时保护，不阻塞 LLM) ──
+      const MEMORY_TIMEOUT_MS = 800; // 超时 800ms 则跳过记忆
       let relevantMemories = "";
-      if (this.memoryManager) {
-        const { rewriteMemoryQuery } = await import("./llm-parser");
-        const searchText = await rewriteMemoryQuery(message);
-        const memResults = await this.memoryManager.recall({
-          text: searchText,
-          userId,
-          sessionId,
-          limit: 5,
-        });
-        if (memResults.length > 0) {
-          relevantMemories =
-            "\n\n## 相关记忆\n" +
-            (memResults as any[]).map((m: any) => `- ${m.entry.content}`).join("\n");
+      const memoryPromise = this.memoryManager
+        ? (async () => {
+            const tMem0 = Date.now();
+            const searchText = message.length > 80
+              ? await (async () => { const { rewriteMemoryQuery } = await import("./llm-parser"); return rewriteMemoryQuery(message); })()
+              : message;
+            const tMemRewrite = Date.now();
+            const memResults = await this.memoryManager!.recall({
+              text: searchText, userId, sessionId, limit: 5,
+            });
+            const tMemRecall = Date.now();
+            console.log(`[chatStream] ⏱ memory: rewrite=${tMemRewrite - tMem0}ms, recall=${tMemRecall - tMemRewrite}ms, total=${tMemRecall - tMem0}ms, results=${memResults.length}`);
+            if (memResults.length > 0) {
+              return "\n\n## 相关记忆\n" + (memResults as any[]).map((m: any) => `- ${m.entry.content}`).join("\n");
+            }
+            return "";
+          })()
+        : Promise.resolve("");
+
+      // 带超时的等待：如果 memory 检索太慢则跳过
+      try {
+        relevantMemories = await Promise.race([
+          memoryPromise,
+          new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error("memory_timeout")), MEMORY_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (e: any) {
+        if (e.message === "memory_timeout") {
+          console.log(`[chatStream] ⏱ memory: TIMEOUT (>${MEMORY_TIMEOUT_MS}ms), skipped`);
+        } else {
+          console.warn(`[chatStream] ⏱ memory error: ${e.message}, skipped`);
         }
+        relevantMemories = "";
       }
 
+      // ── Phase 2: 构建提示词 ──
+      const tPrompt = Date.now();
       const systemPrompt = this.buildSystemPrompt(skills) + relevantMemories;
       const messages: any[] = [
         { role: "system", content: systemPrompt },
         ...history,
         { role: "user", content: message },
       ];
+      console.log(`[chatStream] ⏱ prompt build=${Date.now() - tPrompt}ms, context msgs=${messages.length}`);
 
-      // 流式调用
+      // ── Phase 3: 流式 LLM 调用 ──
+      const tLLM = Date.now();
+      let firstTokenTime = 0;
+      const wrappedCallbacks: StreamCallbacks = {
+        onDelta: async (delta, fullText) => {
+          if (!firstTokenTime) {
+            firstTokenTime = Date.now();
+            console.log(`[chatStream] ⏱ LLM first token=${firstTokenTime - tLLM}ms (TTFT)`);
+          }
+          return callbacks.onDelta(delta, fullText);
+        },
+        onDone: callbacks.onDone,
+        onError: callbacks.onError,
+      };
       const fullText = await streamChat(
         this.client,
         messages,
-        callbacks,
+        wrappedCallbacks,
       );
+      const tLLMDone = Date.now();
+      console.log(`[chatStream] ⏱ LLM total=${tLLMDone - tLLM}ms, output=${fullText.length} chars`);
 
-      // 持久化
+      // ── Phase 4: 持久化（同步部分） ──
+      const tPersist = Date.now();
       this.appendToWorkingMemory(sessionId, "user", message);
       this.appendToWorkingMemory(sessionId, "assistant", fullText);
       this.saveContext(sessionId, userId, message, fullText);
+      console.log(`[chatStream] ⏱ persist=${Date.now() - tPersist}ms`);
 
-      // 异步进化分析
+      // 异步进化分析（不计入总耗时）
       if (this.evolutionEngine) {
         this.evolutionEngine
           .analyzeFeedback(message, fullText, sessionId)
           .catch((err) => console.error("[ChatEngine] Evolution analysis failed:", err));
       }
+
+      const totalMs = Date.now() - t0;
+      console.log(`[chatStream] ⏱ TOTAL=${totalMs}ms | memory=${Date.now() - t0 - (tLLMDone - tLLM)}ms overhead`);
 
       return { response: fullText, sessionId };
     } catch (error: unknown) {
@@ -479,6 +524,7 @@ export class ChatEngine {
       return { response: sanitizedMessage, sessionId };
     }
   }
+
 
   getHistoryMessages(sessionId: string): ChatMessage[] {
     return this.getHistory(sessionId);

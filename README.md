@@ -33,6 +33,7 @@
 - **Skill 系统** — 兼容 Claude Code Agent Skills 标准，内置 10 个 Skill
 - **任务调度** — cron / interval / one-time 三种模式，LLM 智能解析多语言任务意图
 - **飞书集成** — Webhook + WebSocket 长连接双模式，流式卡片输出 + 耗时计时
+- **性能优化** — Embedding LRU 缓存、Memory 超时保护、启动预热、全链路计时埋点
 - **安全层** — 路径边界检查、命令安全过滤、速率限制、SSRF 防护、审计日志
 - **DI 容器** — 自研 IoC 容器，24 个服务 Token，循环依赖检测与有序销毁
 - **心跳系统** — 定时健康检查与自动恢复
@@ -183,6 +184,9 @@ const engine = container.resolve(CHAT_ENGINE);
 - **任务调度意图解析** — 识别「每天早上 8 点提醒我...」等自然语言，自动创建定时任务
 - **LLM 智能任务解析** — 使用 LLM 解析复杂任务意图，支持多语言
 - **记忆查询重写** — LLM 自动优化检索查询，提高记忆召回质量
+- **Embedding 向量缓存** — LRU 256 缓存避免重复 ONNX 推理（500ms→0ms），启动时后台预热模型
+- **Memory 超时保护** — 800ms 阈值，超时跳过记忆检索防止拖慢响应
+- **全链路计时埋点** — chatStream / handleMessageStreaming 分阶段计时日志，便于持续优化
 
 ---
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-03-16 (24)
+
+### perf: 端到端性能优化 — embedding 缓存 + memory 超时保护 + 计时埋点
+
+通过精确计时埋点定位瓶颈后，实施三项优化措施，短消息场景端到端降低 ~400ms。
+
+**耗时分布（优化前）**
+
+| 阶段 | 短消息 | 长消息 |
+|------|--------|--------|
+| Memory recall | 590ms | 1112ms |
+| LLM TTFT | 1542ms | 3298ms |
+| LLM streaming | 1677ms | 48710ms |
+| Persist | 2ms | 1ms |
+| **TOTAL** | **3811ms** | **53122ms** |
+
+**优化措施（3 项）**
+
+1. **Embedding LRU 缓存**（`local-embedder.ts`）：256 条 LRU 缓存避免重复 ONNX 推理，相同查询 ~0ms（原 500ms+）
+2. **Memory 超时保护**（`engine.ts`）：`Promise.race` 800ms 阈值，超时跳过记忆检索，防止记忆系统拖慢响应
+3. **短消息跳过 LLM rewrite**（`engine.ts`）：≤80 字符消息直接用原文搜索，省去 `rewriteMemoryQuery()` 的 LLM 调用（3-8s）
+4. **启动时 Embedding 预热**（`mem0-factory.ts`）：后台异步加载 ONNX 模型，消除首次调用 590ms 冷启动
+
+**修改文件（4 个）**
+
+- `src/memory/local-embedder.ts`: 新增 `EmbeddingCache` 类（LRU 256 容量），`embed()` 方法加缓存读写
+- `src/chat/engine.ts`: `chatStream()` 加全链路计时埋点 + 短消息跳过 rewrite + memory 超时保护
+- `src/memory/mem0-factory.ts`: `patchEmbedderLocal()` 后异步调用 `ensureReady()` 预热
+- `src/integrations/feishu.ts`: `handleMessageStreaming()` 加卡片创建/流式/finalize 分段计时
+
 ## 2026-03-16 (23)
 
 ### feat: 飞书流式卡片输出 + 对话耗时计时
@@ -759,6 +789,36 @@ MEM0_EMBEDDING_MODEL=text-embedding-v3
 - vector_store.db
 
 # Changelog
+
+## 2026-03-16 (24)
+
+### perf: 端到端性能优化 — embedding 缓存 + memory 超时保护 + 计时埋点
+
+通过精确计时埋点定位瓶颈后，实施三项优化措施，短消息场景端到端降低 ~400ms。
+
+**耗时分布（优化前）**
+
+| 阶段 | 短消息 | 长消息 |
+|------|--------|--------|
+| Memory recall | 590ms | 1112ms |
+| LLM TTFT | 1542ms | 3298ms |
+| LLM streaming | 1677ms | 48710ms |
+| Persist | 2ms | 1ms |
+| **TOTAL** | **3811ms** | **53122ms** |
+
+**优化措施（3 项）**
+
+1. **Embedding LRU 缓存**（`local-embedder.ts`）：256 条 LRU 缓存避免重复 ONNX 推理，相同查询 ~0ms（原 500ms+）
+2. **Memory 超时保护**（`engine.ts`）：`Promise.race` 800ms 阈值，超时跳过记忆检索，防止记忆系统拖慢响应
+3. **短消息跳过 LLM rewrite**（`engine.ts`）：≤80 字符消息直接用原文搜索，省去 `rewriteMemoryQuery()` 的 LLM 调用（3-8s）
+4. **启动时 Embedding 预热**（`mem0-factory.ts`）：后台异步加载 ONNX 模型，消除首次调用 590ms 冷启动
+
+**修改文件（4 个）**
+
+- `src/memory/local-embedder.ts`: 新增 `EmbeddingCache` 类（LRU 256 容量），`embed()` 方法加缓存读写
+- `src/chat/engine.ts`: `chatStream()` 加全链路计时埋点 + 短消息跳过 rewrite + memory 超时保护
+- `src/memory/mem0-factory.ts`: `patchEmbedderLocal()` 后异步调用 `ensureReady()` 预热
+- `src/integrations/feishu.ts`: `handleMessageStreaming()` 加卡片创建/流式/finalize 分段计时
 
 All notable changes to this project will be documented in this file.
 

@@ -360,9 +360,11 @@ export class FeishuBot {
     sessionId: string,
   ): Promise<void> {
     let cardSession: StreamingCardSession | null = null;
+    const t0 = Date.now();
 
     try {
       // Step 1: 创建流式卡片
+      const tCard = Date.now();
       cardSession = await this.streamingCard.create(chatId, {
         title: "🤖 FlashClaw",
         headerTemplate: "blue",
@@ -371,21 +373,20 @@ export class FeishuBot {
         showElapsed: this.config.showElapsed,
         subtitle: "正在思考...",
       });
-
-      console.log(`[FeishuBot] Streaming card created: ${cardSession.cardId}`);
+      console.log(`[FeishuBot] ⏱ card create=${Date.now() - tCard}ms, mode=${cardSession.mode}`);
 
       // Step 2: 流式调用 ChatEngine
+      const tStream = Date.now();
       const result = await this.chatEngineAPI!.chatStream!(
         { message: text, sessionId },
         {
           onDelta: async (_delta: string, fullText: string) => {
-            // 每个 delta 推送到卡片
             if (cardSession) {
               await this.streamingCard.pushText(cardSession, fullText);
             }
           },
           onDone: async (fullText: string) => {
-            console.log(`[FeishuBot] Stream done, length=${fullText.length}`);
+            console.log(`[FeishuBot] ⏱ stream done=${Date.now() - tStream}ms, chars=${fullText.length}`);
           },
           onError: async (error: Error) => {
             console.error("[FeishuBot] Stream error:", error.message);
@@ -393,16 +394,15 @@ export class FeishuBot {
         },
       );
 
-      // Step 3: Finalize 卡片（关闭流式模式 + 添加耗时 footer）
+      // Step 3: Finalize
+      const tFinal = Date.now();
       if (cardSession) {
         await this.streamingCard.finalize(cardSession, result.response);
       }
-
-      console.log("[FeishuBot] Streaming reply completed");
+      console.log(`[FeishuBot] ⏱ finalize=${Date.now() - tFinal}ms`);
+      console.log(`[FeishuBot] ⏱ E2E TOTAL=${Date.now() - t0}ms | card=${Date.now() - tCard - (Date.now() - tStream)}ms`);
     } catch (error: any) {
       console.error("[FeishuBot] Streaming failed:", error.message);
-
-      // 降级：如果流式失败，尝试 finalize 已有卡片并显示错误
       if (cardSession && !cardSession.closed) {
         try {
           await this.streamingCard.finalize(
@@ -410,7 +410,6 @@ export class FeishuBot {
             `⚠️ 处理遇到问题，请稍后重试。\n\n错误：${error.message}`,
           );
         } catch {
-          // 二次降级：发送普通文本消息
           await this.sendViaAPI(chatId, "抱歉，处理消息时遇到问题，请稍后重试。");
         }
       } else {
@@ -418,6 +417,7 @@ export class FeishuBot {
       }
     }
   }
+
 
   /**
    * 非流式模式处理消息（降级方案）。

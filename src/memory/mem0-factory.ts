@@ -198,6 +198,13 @@ export function createMem0Memory(
     logger.info(
       `mem0 embedder patched → ${localEmbedder.name} (${embDims}d, lazy-load)`,
     );
+
+    // Warmup: pre-load ONNX model in background to eliminate first-call latency
+    localEmbedder.ensureReady().then(() => {
+      logger.info(`mem0 embedder warmup complete → ${localEmbedder.name} ready`);
+    }).catch((err) => {
+      logger.warn(`mem0 embedder warmup failed (will retry on first use): ${err}`);
+    });
   } else {
     if (!opts.embeddingApiKey) {
       throw new Error(
