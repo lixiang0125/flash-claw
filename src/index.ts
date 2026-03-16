@@ -1,4 +1,5 @@
-import "dotenv/config";
+import { config as dotenvConfig } from "dotenv";
+dotenvConfig({ override: true });
 import { bootstrap, HTTP_SERVER, CONFIG, LOGGER } from "./core/container/bootstrap";
 import { serve } from "bun";
 
