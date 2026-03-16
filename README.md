@@ -32,7 +32,7 @@
 - **8 个内置工具** — bash、文件读写编辑、glob/grep 搜索、Web 搜索与抓取
 - **Skill 系统** — 兼容 Claude Code Agent Skills 标准，内置 10 个 Skill
 - **任务调度** — cron / interval / one-time 三种模式，LLM 智能解析多语言任务意图
-- **飞书集成** — Webhook + WebSocket 长连接双模式
+- **飞书集成** — Webhook + WebSocket 长连接双模式，流式卡片输出 + 耗时计时
 - **安全层** — 路径边界检查、命令安全过滤、速率限制、SSRF 防护、审计日志
 - **DI 容器** — 自研 IoC 容器，24 个服务 Token，循环依赖检测与有序销毁
 - **心跳系统** — 定时健康检查与自动恢复
@@ -469,6 +469,52 @@ Flash-Claw 支持两种飞书接入模式：
 - 连接状态检测：通过 SDK 日志拦截自动判断连接成功/失败
 - 适合高实时性场景
 
+### 流式卡片输出
+
+飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
+
+#### 双模式自动切换
+
+| 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
+|------|-----|----------|----------|----------|
+| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 300ms |
+| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message` | 5 QPS | 1500ms |
+
+- 首次调用 CardKit API 时若权限不足（错误码 `99991672`），自动且永久切换为 PATCH 模式
+- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
+
+#### 流式配置
+
+```bash
+# .env
+FEISHU_STREAMING=true              # 启用流式输出（默认 true）
+FEISHU_SHOW_ELAPSED=true           # 显示耗时统计（默认 true）
+```
+
+
+### 流式卡片输出
+
+飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
+
+#### 双模式自动切换
+
+| 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
+|------|-----|----------|----------|----------|
+| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 300ms |
+| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message` | 5 QPS | 1500ms |
+
+- 首次调用 CardKit API 时若权限不足（错误码 `99991672`），自动且永久切换为 PATCH 模式
+- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
+
+#### 流式配置
+
+```bash
+# .env
+FEISHU_STREAMING=true              # 启用流式输出（默认 true）
+FEISHU_SHOW_ELAPSED=true           # 显示耗时统计（默认 true）
+```
+
+
 ### 配置
 
 ```bash
@@ -588,6 +634,7 @@ flash-claw/
 │   │
 │   ├── chat/                         # 对话引擎
 │   │   ├── engine.ts                 #   ChatEngine 核心（多步工具循环）
+│   │   ├── chatStream.ts             #   流式 LLM 调用（OpenAI stream: true）
 │   │   ├── llm-parser.ts            #   LLM 智能任务解析 + 记忆查询重写
 │   │   └── parsers.ts               #   cronToHumanReadable 等工具函数
 │   │
@@ -643,7 +690,8 @@ flash-claw/
 │   │                                 #   JSON 存储 / cron+interval+one-time
 │   │
 │   ├── integrations/                 # 飞书集成
-│   │                                 #   Webhook + WebSocket 双模式
+│   │   ├── feishu.ts                 #   FeishuBot（Webhook + WebSocket + 流式卡片）
+│   │   └── feishu-streaming-card.ts  #   流式卡片服务（CardKit + PATCH 双模式）
 │   │
 │   ├── heartbeat/                    # 心跳系统
 │   │
@@ -704,7 +752,8 @@ flash-claw/
 | `FEISHU_ENCRYPT_KEY` | 事件加密 Key | — |
 | `FEISHU_VERIFICATION_TOKEN` | 事件验证 Token | — |
 | `FEISHU_MODE` | 连接模式（`webhook` / `websocket`） | `webhook` |
-
+| `FEISHU_STREAMING` | 启用流式卡片输出 | `true` |
+| `FEISHU_SHOW_ELAPSED` | 显示回复耗时统计 | `true` |
 ### 服务器
 
 | 变量 | 说明 | 默认值 |

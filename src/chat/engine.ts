@@ -3,10 +3,11 @@ import { listSkills, type Skill } from "../skills";
 import { type IMemoryManager } from "../memory";
 import { parseTaskWithLLM, rewriteMemoryQuery } from "./llm-parser";
 import { cronToHumanReadable } from "./parsers";
-import type { ChatRequest, ChatResponse } from "./types";
+import type { ChatRequest, ChatResponse, StreamCallbacks } from "./types";
 import { ErrorSanitizer } from "../infra/error-handler";
 import type { WorkingMemory, ConversationMessage } from "../memory/working-memory";
 import type { IEvolutionEngine } from "../core/container/tokens";
+import { streamChat } from "./chatStream";
 
 const MAX_STEPS = 10;
 
@@ -404,6 +405,79 @@ export class ChatEngine {
       }
     }
     this.sessionSkills.delete(sessionId);
+  }
+
+
+  /**
+   * 流式对话 —— 通过回调实时推送 LLM 输出文本。
+   *
+   * 与 chat() 的区别：
+   * - 使用 OpenAI stream 模式，逐 token 推送
+   * - 通过 StreamCallbacks 回调通知调用方（如 FeishuBot 流式卡片）
+   * - 不执行工具调用循环（流式场景优先返回文本）
+   * - 持久化逻辑与 chat() 一致
+   */
+  async chatStream(
+    request: ChatRequest,
+    callbacks: StreamCallbacks,
+  ): Promise<ChatResponse> {
+    const { message, sessionId = "default", userId = "default" } = request;
+    const history = this.getHistory(sessionId);
+    const skills = this.getSessionSkills(sessionId);
+
+    try {
+      // 记忆检索
+      let relevantMemories = "";
+      if (this.memoryManager) {
+        const { rewriteMemoryQuery } = await import("./llm-parser");
+        const searchText = await rewriteMemoryQuery(message);
+        const memResults = await this.memoryManager.recall({
+          text: searchText,
+          userId,
+          sessionId,
+          limit: 5,
+        });
+        if (memResults.length > 0) {
+          relevantMemories =
+            "\n\n## 相关记忆\n" +
+            (memResults as any[]).map((m: any) => `- ${m.entry.content}`).join("\n");
+        }
+      }
+
+      const systemPrompt = this.buildSystemPrompt(skills) + relevantMemories;
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        ...history,
+        { role: "user", content: message },
+      ];
+
+      // 流式调用
+      const fullText = await streamChat(
+        this.client,
+        messages,
+        callbacks,
+      );
+
+      // 持久化
+      this.appendToWorkingMemory(sessionId, "user", message);
+      this.appendToWorkingMemory(sessionId, "assistant", fullText);
+      this.saveContext(sessionId, userId, message, fullText);
+
+      // 异步进化分析
+      if (this.evolutionEngine) {
+        this.evolutionEngine
+          .analyzeFeedback(message, fullText, sessionId)
+          .catch((err) => console.error("[ChatEngine] Evolution analysis failed:", err));
+      }
+
+      return { response: fullText, sessionId };
+    } catch (error: unknown) {
+      const sanitizedMessage = ErrorSanitizer.sanitize(error, {
+        sessionId,
+        operation: "chatStream",
+      });
+      return { response: sanitizedMessage, sessionId };
+    }
   }
 
   getHistoryMessages(sessionId: string): ChatMessage[] {

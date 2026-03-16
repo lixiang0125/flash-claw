@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-03-16 (23)
+
+### feat: 飞书流式卡片输出 + 对话耗时计时
+
+为飞书机器人添加流式输出能力，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
+
+**新增文件（2 个）**
+
+- `src/integrations/feishu-streaming-card.ts` (494 行): 飞书流式卡片服务，支持双模式自动切换
+- `src/chat/chatStream.ts` (65 行): 独立流式 LLM 调用模块，基于 OpenAI SDK `stream: true`
+
+**修改文件（3 个）**
+
+- `src/integrations/feishu.ts`: 新增 `handleMessageStreaming()` / `handleMessageNonStreaming()` 双路径，自动根据配置选择流式或非流式
+- `src/chat/engine.ts`: 新增 `chatStream()` 方法，构建完整上下文后调用 `streamChat()`，完成后持久化记忆与异步进化分析
+- `src/chat/types.ts`: 新增 `StreamCallbacks` 接口（`onDelta` / `onDone` / `onError`）
+
+**双模式流式卡片（`FeishuStreamingCard`）**
+
+| 模式 | API | 权限要求 | QPS 限制 | 更新上限 | 节流间隔 |
+|------|-----|----------|----------|----------|----------|
+| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 无限制 | 300ms |
+| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message`（通常已有） | 5 QPS | ~18 次 | 1500ms |
+
+- 首次调用 CardKit API 时若返回 `99991672`（权限不足），自动且永久切换为 PATCH 模式
+- 支持 Markdown 格式的流式文本推送
+- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
+
+**ChatEngine 流式扩展**
+
+- `chatStream()` 方法与 `chat()` 共享完整上下文构建逻辑（记忆检索、system prompt、进化策略注入）
+- 通过 `StreamCallbacks` 模式将 delta 推送给调用方，解耦 LLM 流与卡片更新
+- 流式模式不执行工具调用循环（优先返回文本），适合飞书场景
+
+**FeishuBot 流式集成**
+
+- 新增配置项：`enableStreaming`（环境变量 `FEISHU_STREAMING`，默认 `true`）、`showElapsed`（环境变量 `FEISHU_SHOW_ELAPSED`，默认 `true`）
+- `handleMessage()` 自动检测 `chatEngine.chatStream` 是否可用，决定流式/非流式路径
+- 非流式模式下同样显示耗时（追加到回复文本末尾）
+- `getStatus()` 新增 `streaming: boolean` 字段
+
+**验证**: 216 pass / 4 skip / 1 pre-existing fail，零回归。PATCH 模式端到端测试通过（5 次流式更新 + 耗时 footer）。
+
+
 ## 2026-03-16 (22)
 
 ### fix: 增强飞书 WebSocket 重连机制与端口配置

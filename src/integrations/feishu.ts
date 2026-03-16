@@ -1,4 +1,5 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
+import { FeishuStreamingCard, type StreamingCardSession } from "./feishu-streaming-card";
 
 export interface FeishuConfig {
   appId?: string;
@@ -6,6 +7,10 @@ export interface FeishuConfig {
   verificationToken?: string;
   webhookUrl?: string;
   useLongConnection?: boolean;
+  /** 是否启用流式卡片输出（默认 true） */
+  enableStreaming?: boolean;
+  /** 是否在 footer 显示耗时（默认 true） */
+  showElapsed?: boolean;
 }
 
 /**
@@ -14,6 +19,14 @@ export interface FeishuConfig {
  */
 interface ChatEngineAPI {
   chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+  chatStream?(
+    request: { message: string; sessionId: string },
+    callbacks: {
+      onDelta: (delta: string, fullText: string) => void | Promise<void>;
+      onDone: (fullText: string) => void | Promise<void>;
+      onError?: (error: Error) => void | Promise<void>;
+    },
+  ): Promise<{ response: string }>;
 }
 
 /**
@@ -35,6 +48,9 @@ export class FeishuBot {
   private chatEngineAPI: ChatEngineAPI | null = null;
   private taskSchedulerAPI: TaskSchedulerAPI | null = null;
 
+  /* ── 流式卡片管理器 ── */
+  private streamingCard: FeishuStreamingCard;
+
   constructor() {
     this.config = {
       appId: process.env.FEISHU_APP_ID,
@@ -42,7 +58,12 @@ export class FeishuBot {
       verificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
       webhookUrl: process.env.FEISHU_WEBHOOK_URL,
       useLongConnection: process.env.FEISHU_USE_LONG_CONNECTION !== "false",
+      enableStreaming: process.env.FEISHU_STREAMING !== "false",
+      showElapsed: process.env.FEISHU_SHOW_ELAPSED !== "false",
     };
+
+    // 初始化流式卡片管理器，注入 token 获取函数
+    this.streamingCard = new FeishuStreamingCard(() => this.getTenantAccessToken());
 
     // NOTE: No auto-start here. Call start() after DI wiring is complete.
   }
@@ -244,6 +265,16 @@ export class FeishuBot {
   }
 
 
+  /**
+   * 处理收到的飞书消息。
+   *
+   * 核心改进：支持流式卡片输出
+   * 1. 创建 CardKit 流式卡片并发送
+   * 2. 调用 ChatEngine.chatStream() 流式获取 LLM 输出
+   * 3. 实时将文本 delta 推送到卡片
+   * 4. 完成后关闭流式模式，显示耗时 footer
+   * 5. 如果流式不可用，降级为非流式模式
+   */
   private async handleMessage(event: any): Promise<void> {
     console.log("Feishu: Received event:", JSON.stringify(event));
 
@@ -276,7 +307,7 @@ export class FeishuBot {
       return;
     }
 
-    const senderId = message.sender?.sender_id;
+    const senderId = event.sender?.sender_id || message.sender?.sender_id;
     const chatId = message.chat_id;
     const sessionId = this.getSessionId(chatId, senderId);
     const messageId = message.message_id;
@@ -289,7 +320,7 @@ export class FeishuBot {
     );
 
     // Add emoji reaction (no LLM required)
-    await this.addReaction(messageId, "face:收到");
+    await this.addReaction(messageId, "THUMBSUP");
 
     // Background processing
     console.log("Feishu: Setting up background task");
@@ -300,16 +331,17 @@ export class FeishuBot {
           console.error("Feishu: ChatEngine 未注入，无法处理消息");
           return;
         }
-        console.log("Feishu: Calling chatEngine");
-        const result = await this.chatEngineAPI.chat({
-          message: text,
-          sessionId,
-        });
-        console.log("Feishu: Chat done, response length:", result.response.length);
 
-        console.log("Feishu: Calling sendMessage");
-        await this.sendMessage(chatId, senderId, result.response);
-        console.log("Feishu: sendMessage completed");
+        // 判断是否使用流式卡片
+        const useStreaming =
+          this.config.enableStreaming &&
+          typeof this.chatEngineAPI.chatStream === "function";
+
+        if (useStreaming) {
+          await this.handleMessageStreaming(chatId, text, sessionId);
+        } else {
+          await this.handleMessageNonStreaming(chatId, senderId, text, sessionId);
+        }
       } catch (error) {
         console.error("Feishu: Chat error:", error);
         const errorResponse = await this.generateErrorResponse(text, error);
@@ -318,17 +350,115 @@ export class FeishuBot {
     }, 100);
   }
 
+  /**
+   * 流式模式处理消息：
+   * 1. 创建流式卡片 → 2. 流式推送 LLM 输出 → 3. finalize 显示耗时
+   */
+  private async handleMessageStreaming(
+    chatId: string,
+    text: string,
+    sessionId: string,
+  ): Promise<void> {
+    let cardSession: StreamingCardSession | null = null;
+
+    try {
+      // Step 1: 创建流式卡片
+      cardSession = await this.streamingCard.create(chatId, {
+        title: "🤖 FlashClaw",
+        headerTemplate: "blue",
+        finishTitle: "🤖 FlashClaw",
+        finishTemplate: "green",
+        showElapsed: this.config.showElapsed,
+        subtitle: "正在思考...",
+      });
+
+      console.log(`[FeishuBot] Streaming card created: ${cardSession.cardId}`);
+
+      // Step 2: 流式调用 ChatEngine
+      const result = await this.chatEngineAPI!.chatStream!(
+        { message: text, sessionId },
+        {
+          onDelta: async (_delta: string, fullText: string) => {
+            // 每个 delta 推送到卡片
+            if (cardSession) {
+              await this.streamingCard.pushText(cardSession, fullText);
+            }
+          },
+          onDone: async (fullText: string) => {
+            console.log(`[FeishuBot] Stream done, length=${fullText.length}`);
+          },
+          onError: async (error: Error) => {
+            console.error("[FeishuBot] Stream error:", error.message);
+          },
+        },
+      );
+
+      // Step 3: Finalize 卡片（关闭流式模式 + 添加耗时 footer）
+      if (cardSession) {
+        await this.streamingCard.finalize(cardSession, result.response);
+      }
+
+      console.log("[FeishuBot] Streaming reply completed");
+    } catch (error: any) {
+      console.error("[FeishuBot] Streaming failed:", error.message);
+
+      // 降级：如果流式失败，尝试 finalize 已有卡片并显示错误
+      if (cardSession && !cardSession.closed) {
+        try {
+          await this.streamingCard.finalize(
+            cardSession,
+            `⚠️ 处理遇到问题，请稍后重试。\n\n错误：${error.message}`,
+          );
+        } catch {
+          // 二次降级：发送普通文本消息
+          await this.sendViaAPI(chatId, "抱歉，处理消息时遇到问题，请稍后重试。");
+        }
+      } else {
+        await this.sendViaAPI(chatId, "抱歉，处理消息时遇到问题，请稍后重试。");
+      }
+    }
+  }
+
+  /**
+   * 非流式模式处理消息（降级方案）。
+   */
+  private async handleMessageNonStreaming(
+    chatId: string,
+    senderId: any,
+    text: string,
+    sessionId: string,
+  ): Promise<void> {
+    console.log("[FeishuBot] Using non-streaming mode");
+    const startTime = Date.now();
+
+    const result = await this.chatEngineAPI!.chat({
+      message: text,
+      sessionId,
+    });
+
+    const elapsed = Date.now() - startTime;
+    const elapsedStr = elapsed < 1000
+      ? `${elapsed}ms`
+      : `${(elapsed / 1000).toFixed(1)}s`;
+
+    // 非流式模式：添加耗时到回复末尾
+    let reply = result.response;
+    if (this.config.showElapsed) {
+      reply += `\n\n---\n⏱ 耗时 ${elapsedStr}`;
+    }
+
+    console.log("Feishu: Chat done, response length:", result.response.length);
+    await this.sendMessage(chatId, senderId, reply);
+    console.log("Feishu: sendMessage completed");
+  }
+
   private async generateErrorResponse(userMessage: string, error: any): Promise<string> {
     if (!this.chatEngineAPI) {
       return "抱歉，我遇到了一些问题。请稍后重试，或者换一种方式提问。";
     }
     try {
       const result = await this.chatEngineAPI.chat({
-        message: `用户说: "${userMessage}"
-
-处理用户请求时发生错误: ${error.message || error}
-
-请生成一个友好的回复，告知用户遇到了问题，但不要提到技术细节。可以建议用户稍后重试或换一种方式提问。`,
+        message: `用户说: "${userMessage}"\n\n处理用户请求时发生错误: ${error.message || error}\n\n请生成一个友好的回复，告知用户遇到了问题，但不要提到技术细节。可以建议用户稍后重试或换一种方式提问。`,
         sessionId: "feishu_error_response",
       });
       return result.response;
@@ -538,7 +668,7 @@ export class FeishuBot {
       if (!text) return { success: true };
 
       const chatId = message.chat_id;
-      const senderId = message.sender?.sender_id;
+      const senderId = event.sender?.sender_id || message.sender?.sender_id;
       const sessionId = this.getSessionId(chatId, senderId);
 
       console.log(
@@ -569,11 +699,11 @@ export class FeishuBot {
   /**
    * 获取飞书连接状态
    */
-  getStatus(): { connected: boolean; appId?: string } {
+  getStatus(): { connected: boolean; appId?: string; streaming: boolean } {
     return {
       connected: !!this.wsClient,
       appId: this.config.appId,
+      streaming: !!this.config.enableStreaming,
     };
   }
 }
-
