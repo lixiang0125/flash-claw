@@ -9,6 +9,7 @@
 
 import OpenAI from "openai";
 import type { StreamCallbacks } from "./types";
+import { resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 /**
  * 使用 OpenAI SDK 的 stream 模式进行流式对话。
@@ -29,7 +30,7 @@ export async function streamChat(
   callbacks: StreamCallbacks,
   model?: string,
 ): Promise<string> {
-  const modelName = model || process.env.MODEL || "qwen-plus";
+  const modelName = model || resolveOpenAICompatibleConfig().model;
   let fullText = "";
 
   try {

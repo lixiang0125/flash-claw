@@ -8,11 +8,12 @@
  * Also provides rewriteMemoryQuery() to replace the hardcoded Chinese regex
  * patterns in buildMemorySearchText().
  *
- * Uses OpenAI SDK pointed at DashScope (Qwen) backend via env vars:
- *   OPENAI_BASE_URL, OPENAI_API_KEY, MODEL
+ * Uses a shared OpenAI-compatible LLM config via env vars:
+ *   OPENAI_API_KEY, OPENAI_BASE_URL, MODEL
  */
 
 import OpenAI from "openai";
+import { resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,20 +41,25 @@ interface LLMTaskResponse {
 // ---------------------------------------------------------------------------
 
 let _client: OpenAI | null = null;
+let _clientSignature = "";
 
 function getClient(): OpenAI {
-  if (!_client) {
+  const config = resolveOpenAICompatibleConfig();
+  const nextSignature = `${config.apiKey}::${config.baseURL || ""}`;
+
+  if (!_client || _clientSignature !== nextSignature) {
     _client = new OpenAI({
-      baseURL: process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      apiKey: process.env.OPENAI_API_KEY || "",
+      apiKey: config.apiKey,
+      ...(config.baseURL ? { baseURL: config.baseURL } : {}),
       timeout: 10_000, // 10s hard timeout on the HTTP request
     });
+    _clientSignature = nextSignature;
   }
   return _client;
 }
 
 function getModel(): string {
-  return process.env.MODEL || "qwen-plus";
+  return resolveOpenAICompatibleConfig().model;
 }
 
 // ---------------------------------------------------------------------------

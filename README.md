@@ -15,7 +15,7 @@
 |------|----------|------|
 | **运行时** | [Bun](https://bun.sh) | 高性能 JavaScript/TypeScript 运行时 |
 | **Web 框架** | [Hono](https://hono.dev) | 超轻量 Web 框架，兼容多运行时 |
-| **AI 推理** | OpenAI SDK | 兼容 DashScope / 阿里云百炼，使用 Qwen Function Calling |
+| **AI 推理** | OpenAI SDK | 兼容 OpenAI / DashScope 等 OpenAI-compatible 模型服务 |
 | **前端** | React 19 + Vite | 单页应用，Vite 构建 |
 | **数据库** | SQLite (`bun:sqlite`) | 内嵌数据库，零依赖部署 |
 | **向量记忆** | [mem0ai](https://github.com/mem0ai/mem0) v2.3.0 OSS | 本地向量搜索，`better-sqlite3` → `bun:sqlite` shim |
@@ -69,9 +69,15 @@ cp .env.example .env
 编辑 `.env` 文件，至少配置以下变量：
 
 ```bash
-# AI 推理（必须）
-DASHSCOPE_API_KEY=sk-xxxxx          # 阿里云百炼 / DashScope API Key
-MODEL_NAME=qwen-max                  # 模型名称
+# AI 推理（必须，任选一种 OpenAI-compatible 服务）
+OPENAI_API_KEY=sk-xxxxx
+MODEL=gpt-4o-mini
+
+# 可选：如果接 OpenAI 官方，可不填 OPENAI_BASE_URL
+# OPENAI_BASE_URL=https://api.openai.com/v1
+
+# 可选：如果接 DashScope / 其他兼容服务，改成对应端点
+# OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # 可选
 TAVILY_API_KEY=tvly-xxxxx           # Web 搜索（Tavily）
@@ -103,6 +109,16 @@ curl -X POST http://localhost:3090/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "你好，介绍一下你自己"}'
 ```
+
+Web 页面顶部会显示后端连通性、当前模型、API Key 配置状态和当前生效端点，方便快速确认前后端以及模型配置是否已生效。
+
+对于第三方 OpenAI-compatible 网关，主对话接口现在会自动重试短暂的网络抖动和 5xx 错误，降低偶发失败直接暴露给 Web 页的概率。
+
+Web 聊天界面在 PC 端使用固定容器宽度，并为思考中的气泡保留独立边距，减少布局跳动。
+
+当前 Web 聊天区还额外统一了消息列表和输入区留白，PC 端阅读宽度更稳定。
+
+消息气泡宽度也做了进一步约束，长文本在 PC 端更接近稳定阅读列宽。
 
 ---
 
@@ -426,6 +442,8 @@ skills/
 └── ...
 ```
 
+`references/` 和 `scripts/` 目录只会加载普通文件；如果目录中包含子目录或资源文件夹，系统会自动跳过，避免影响 `/api/skills` 接口。
+
 ---
 
 ## 任务调度
@@ -732,14 +750,16 @@ flash-claw/
 
 | 变量 | 说明 | 示例 |
 |------|------|------|
-| `DASHSCOPE_API_KEY` | 阿里云百炼 / DashScope API Key | `sk-xxxxx` |
+| `OPENAI_API_KEY` | OpenAI-compatible 服务 API Key | `sk-xxxxx` |
 
 ### AI 模型
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `MODEL_NAME` | 主模型名称 | `qwen-max` |
-| `BASE_URL` | OpenAI 兼容 API 地址 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `MODEL` | 主模型名称 | `gpt-4o-mini` |
+| `OPENAI_BASE_URL` | OpenAI 兼容 API 地址；OpenAI 官方可留空或填 `https://api.openai.com/v1` | `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | 模型名别名，低优先级回退 | — |
+| `MODEL_NAME` | 兼容旧配置的模型名别名，低优先级回退 | — |
 
 ### 工具 API
 

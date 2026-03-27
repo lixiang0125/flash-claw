@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-03-27 (26)
+
+### refactor: 统一 OpenAI-compatible LLM 配置，移除 Qwen 写死默认值
+
+- 新增 `src/infra/llm/openai-compatible.ts`，集中解析 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`MODEL` 等配置。
+- 主对话、任务解析、自进化和 mem0 统一复用这套配置，支持切换到 OpenAI 官方模型或其他兼容服务。
+- 更新 `.env.example` 与 `README.md`，补充 OpenAI 官方和 DashScope 的配置示例。
+
+### fix: 跳过 Skill 资源子目录，修复 Web 端 `/api/skills` 500
+
+- 修复 `src/skills/index.ts`：读取 `references/` 与 `scripts/` 时仅加载普通文件，避免把子目录误读为脚本。
+- 新增 `tests/skills.test.ts`，验证 `listSkills()` 在当前 skills 目录结构下可稳定返回结果。
+
+### feat: Web 顶部新增后端连通性和模型状态提示
+
+- 新增 `/api/status`，向前端返回脱敏后的后端连通性和当前 LLM 配置摘要。
+- Web 页面顶部新增状态条，显示后端在线状态、当前模型、API Key 配置状态和生效端点。
+
+### fix: 对第三方 LLM 网关增加轻量重试，减少偶发回复失败
+
+- `src/chat/engine.ts` 针对网络超时、连接错误和上游 5xx 增加轻量重试，避免一次瞬时抖动直接返回错误编号。
+- 新增 `tests/engine.test.ts` 回归用例，覆盖首次失败后重试成功的场景。
+
+### fix: 优化 Web 聊天容器宽度和思考气泡边距
+
+- 固定 PC 端聊天容器宽度，避免首屏无消息时容器偏窄、出现消息后突然变宽。
+- 为思考中的气泡补充左右和底部边距，避免紧贴左下角。
+
+### tweak: 进一步收紧 Web 主容器并统一消息区留白
+
+- 将 PC 端聊天容器进一步收敛到更稳定的阅读宽度，并同步调整消息区与输入区内边距。
+- 微调思考气泡外边距，让加载态与消息列表的垂直节奏更一致。
+
+### tweak: 收紧消息气泡最大宽度
+
+- 将消息气泡最大宽度调整为容器的 `76%`，让长文本在 PC 端更稳定、不显得过宽。
+
 ## 2026-03-16 (25)
 
 ### fix: 飞书流式路径缺失任务调度解析 — 定时提醒功能在流式模式下失效

@@ -250,6 +250,24 @@ describe("ChatEngine", () => {
       expect(r.response.length).toBeGreaterThan(0);
     });
 
+    it("chat() 遇到可重试错误时会自动重试", async () => {
+      const create = mock()
+        .mockRejectedValueOnce(Object.assign(new Error("network timeout"), { code: "ETIMEDOUT" }))
+        .mockResolvedValueOnce({
+          choices: [{ message: { role: "assistant", content: "重试成功" } }],
+        });
+
+      wireEngine({
+        client: {
+          chat: { completions: { create } },
+        } as any,
+      });
+
+      const r = await chatEngine.chat({ message: "重试测试", sessionId: "s-retry" });
+      expect(r.response).toBe("重试成功");
+      expect(create).toHaveBeenCalledTimes(2);
+    });
+
     it("chat() 在消息数超过压缩阈值时触发自动压缩", async () => {
       const wm = new WorkingMemory({ compressionThreshold: 5 });
       // 预填充消息以超过阈值

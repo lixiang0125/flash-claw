@@ -141,11 +141,11 @@ function loadSkillFromDir(baseDir: string, name: string): Skill | null {
   const references: string[] = [];
   const refsPath = path.join(skillPath, "references");
   if (fs.existsSync(refsPath)) {
-    const files = fs.readdirSync(refsPath);
+    const files = fs.readdirSync(refsPath, { withFileTypes: true });
     for (const file of files) {
-      if (file.endsWith(".md")) {
-        const refContent = fs.readFileSync(path.join(refsPath, file), "utf-8");
-        references.push(`## ${file}\n\n${refContent}`);
+      if (file.isFile() && file.name.endsWith(".md")) {
+        const refContent = fs.readFileSync(path.join(refsPath, file.name), "utf-8");
+        references.push(`## ${file.name}\n\n${refContent}`);
       }
     }
   }
@@ -153,10 +153,15 @@ function loadSkillFromDir(baseDir: string, name: string): Skill | null {
   const scripts: Record<string, string> = {};
   const scriptsPath = path.join(skillPath, "scripts");
   if (fs.existsSync(scriptsPath)) {
-    const files = fs.readdirSync(scriptsPath);
+    const files = fs.readdirSync(scriptsPath, { withFileTypes: true });
     for (const file of files) {
-      const scriptPath = path.join(scriptsPath, file);
-      scripts[file] = fs.readFileSync(scriptPath, "utf-8");
+      if (!file.isFile()) {
+        continue;
+      }
+
+      const scriptPath = path.join(scriptsPath, file.name);
+      // Skill scripts 目录里可能包含资源子目录，必须跳过目录以免 /api/skills 读取时报 EISDIR。
+      scripts[file.name] = fs.readFileSync(scriptPath, "utf-8");
     }
   }
 

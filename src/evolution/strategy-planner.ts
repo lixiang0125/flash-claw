@@ -12,6 +12,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import type { Logger, AppConfig } from "../core/container/tokens";
 import type { FeedbackAnalysis, EvolutionStrategy } from "./types";
+import { createOpenAICompatibleClient, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 /** EVOLUTION.md 文件的默认路径 */
 const EVOLUTION_FILENAME = "EVOLUTION.md";
@@ -26,14 +27,13 @@ export class StrategyPlanner {
   private client: OpenAI;
   private logger: Logger;
   private evolutionFilePath: string;
+  private model: string;
 
   constructor(logger: Logger, config: AppConfig) {
     this.logger = logger;
     this.evolutionFilePath = path.resolve(config.workspacePath, EVOLUTION_FILENAME);
-    this.client = new OpenAI({
-      baseURL: process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      apiKey: process.env.OPENAI_API_KEY || "",
-    });
+    this.model = resolveOpenAICompatibleConfig().model;
+    this.client = createOpenAICompatibleClient();
   }
 
   /**
@@ -102,7 +102,7 @@ ${JSON.stringify(existingSummary, null, 2)}
 仅输出 JSON 数组，不要有其他文字。`;
 
     const response = await this.client.chat.completions.create({
-      model: process.env.MODEL || "qwen-plus",
+      model: this.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: `反馈分析结果：\n${JSON.stringify(feedbackSummary, null, 2)}` },

@@ -2,6 +2,7 @@ import { Memory } from "mem0ai/oss";
 import { patchEmbedderBaseURL, patchEmbedderLocal } from "./mem0-embedder-patch";
 import { LocalTransformersEmbedder } from "./local-embedder";
 import type { Logger } from "../core/container/tokens";
+import { resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 /** Known local models and their output dimensions. */
 const LOCAL_MODEL_DIMS: Record<string, number> = {
@@ -21,11 +22,11 @@ function resolveLocalDims(
 }
 
 export interface Mem0FactoryOptions {
-  /** LLM API key — defaults to OPENAI_API_KEY (coding endpoint key) */
+  /** LLM API key — defaults to the shared OpenAI-compatible API key */
   apiKey: string;
-  /** LLM base URL — defaults to OPENAI_BASE_URL (coding endpoint) */
-  baseURL: string;
-  /** LLM model — defaults to MODEL env var (same model as main chat) */
+  /** LLM base URL — defaults to the shared OpenAI-compatible base URL */
+  baseURL?: string;
+  /** LLM model — defaults to the shared MODEL env var */
   llmModel: string;
 
   /**
@@ -54,18 +55,16 @@ export interface Mem0FactoryOptions {
 const localModel =
   process.env.MEM0_LOCAL_MODEL || "Xenova/multilingual-e5-small";
 
+const sharedLLMConfig = resolveOpenAICompatibleConfig();
+
 const DEFAULT_OPTIONS: Mem0FactoryOptions = {
   // ── LLM ────────────────────────────────────────────────────────────────
-  // 复用主 LLM 配置：coding 端点 + 相同模型，无需额外 API key
-  apiKey: process.env.OPENAI_API_KEY || "",
-  baseURL:
-    process.env.MEM0_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    "https://coding.dashscope.aliyuncs.com/v1",
+  // 复用主 LLM 配置：可接任意 OpenAI-compatible 服务，无需写死 Qwen
+  apiKey: sharedLLMConfig.apiKey,
+  baseURL: process.env.MEM0_BASE_URL || sharedLLMConfig.baseURL,
   llmModel:
     process.env.MEM0_LLM_MODEL ||
-    process.env.MODEL ||
-    "qwen3.5-plus",
+    sharedLLMConfig.model,
 
   // ── Embedding mode ─────────────────────────────────────────────────────
   embeddingMode:
@@ -92,12 +91,12 @@ const DEFAULT_OPTIONS: Mem0FactoryOptions = {
  * Create a mem0 Memory instance configured for local OSS mode.
  *
  * Architecture:
- *   - **LLM**       -> Coding DashScope endpoint, same key/model as main chat
+ *   - **LLM**       -> Shared OpenAI-compatible endpoint, same key/model as main chat
  *   - **Embedding** -> Local @xenova/transformers (default) or remote API
  *
  * LLM configuration:
- *   - Uses OPENAI_API_KEY + OPENAI_BASE_URL (coding endpoint) by default
- *   - Model defaults to MODEL env var (e.g. qwen3.5-plus)
+ *   - Uses the shared OpenAI-compatible API key / base URL by default
+ *   - Model defaults to MODEL env var (for example `gpt-4o-mini` or `qwen-plus`)
  *   - Can be overridden via MEM0_BASE_URL / MEM0_LLM_MODEL if needed
  *   - This eliminates the need for a separate general DashScope API key
  *
@@ -162,7 +161,7 @@ export function createMem0Memory(
       config: {
         apiKey: opts.apiKey,
         model: opts.llmModel,
-        baseURL: opts.baseURL,
+        ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
       },
     },
     embedder: {

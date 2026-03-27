@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import type { Logger } from "../core/container/tokens";
 import type { FeedbackAnalysis, FeedbackSignal } from "./types";
+import { createOpenAICompatibleClient, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 /** 分析结果的内存缓存键 = sessionId + userMessage 前 80 字符的哈希 */
 function cacheKey(sessionId: string, userMessage: string): string {
@@ -25,6 +26,7 @@ function cacheKey(sessionId: string, userMessage: string): string {
 export class FeedbackAnalyzer {
   private client: OpenAI;
   private logger: Logger;
+  private model: string;
   /** 分析结果缓存，避免重复分析同一对话 */
   private cache: Map<string, FeedbackAnalysis> = new Map();
   /** 缓存容量上限 */
@@ -32,10 +34,8 @@ export class FeedbackAnalyzer {
 
   constructor(logger: Logger) {
     this.logger = logger;
-    this.client = new OpenAI({
-      baseURL: process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      apiKey: process.env.OPENAI_API_KEY || "",
-    });
+    this.model = resolveOpenAICompatibleConfig().model;
+    this.client = createOpenAICompatibleClient();
   }
 
   /**
@@ -145,7 +145,7 @@ export class FeedbackAnalyzer {
 助手回复：${assistantResponse.slice(0, 500)}`;
 
     const response = await this.client.chat.completions.create({
-      model: process.env.MODEL || "qwen-plus",
+      model: this.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

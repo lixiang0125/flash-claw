@@ -47,3 +47,18 @@ export interface Skill {
   instructions?: string;
   examples?: string[];
 }
+
+/**
+ * Web 页使用的后端状态响应。
+ */
+export interface BackendStatus {
+  backend: {
+    connected: boolean;
+    checkedAt: number;
+  };
+  llm: {
+    model: string;
+    baseURL?: string;
+    apiKeyConfigured: boolean;
+  };
+}

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import type { ChatRequest } from "../chat/types";
 import type { Logger } from "../core/container/tokens";
+import { resolveOpenAICompatibleConfig } from "./llm/openai-compatible";
 
 interface AppServices {
   chatEngine: {
@@ -43,6 +44,23 @@ export function createHonoApp(services: AppServices): Hono {
   app.use("/*", serveStatic({ root: "./dist" }));
 
   app.get("/", (c) => c.text("Flash Claw Chat API"));
+
+  app.get("/api/status", (c) => {
+    const llmConfig = resolveOpenAICompatibleConfig();
+
+    // Web 端只需要可展示的健康信息，绝不能返回明文密钥。
+    return c.json({
+      backend: {
+        connected: true,
+        checkedAt: Date.now(),
+      },
+      llm: {
+        model: llmConfig.model,
+        baseURL: llmConfig.baseURL,
+        apiKeyConfigured: Boolean(llmConfig.apiKey),
+      },
+    });
+  });
 
   app.post("/api/chat", async (c) => {
     const body = await c.req.json<ChatRequest>();

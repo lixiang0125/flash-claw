@@ -1,4 +1,8 @@
 import OpenAI from "openai";
+import type {
+  ChatCompletion,
+  ChatCompletionCreateParamsNonStreaming,
+} from "openai/resources/chat/completions/completions";
 import { listSkills, type Skill } from "../skills";
 import { type IMemoryManager } from "../memory";
 import { parseTaskWithLLM, rewriteMemoryQuery } from "./llm-parser";
@@ -8,8 +12,10 @@ import { ErrorSanitizer } from "../infra/error-handler";
 import type { WorkingMemory, ConversationMessage } from "../memory/working-memory";
 import type { IEvolutionEngine } from "../core/container/tokens";
 import { streamChat } from "./chatStream";
+import { createOpenAICompatibleClient, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 const MAX_STEPS = 10;
+const CHAT_RETRY_DELAYS_MS = [300, 900] as const;
 
 interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -17,6 +23,38 @@ interface ChatMessage {
   tool_call_id?: string;
   toolName?: string;
   name?: string;
+}
+
+interface RetryableLLMError {
+  status?: number;
+  code?: string;
+  message?: string;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableLLMError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const llmError = error as RetryableLLMError;
+  const status = llmError.status;
+  const code = llmError.code;
+  const message = error.message.toLowerCase();
+
+  if (typeof status === "number" && status >= 500) {
+    return true;
+  }
+
+  return code === "ECONNRESET"
+    || code === "ETIMEDOUT"
+    || code === "ECONNREFUSED"
+    || message.includes("timeout")
+    || message.includes("connection")
+    || message.includes("network");
 }
 
 /**
@@ -43,6 +81,7 @@ function wmToChat(msgs: ConversationMessage[]): ChatMessage[] {
 /** 聊天引擎 —— 核心对话处理模块，负责 LLM 交互、工具调用、记忆检索与任务调度。 */
 export class ChatEngine {
   private client: OpenAI;
+  private model: string;
   private sessionSkills: Map<string, Skill[]> = new Map();
   private tools: any[] = [];
   private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
@@ -59,14 +98,14 @@ export class ChatEngine {
   private evolutionEngine: IEvolutionEngine | null = null;
 
   constructor() {
-    const baseURL = process.env.OPENAI_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
-    const apiKey = process.env.OPENAI_API_KEY || "";
+    const config = resolveOpenAICompatibleConfig();
 
-    console.log("Using OpenAI SDK, baseURL:", baseURL);
+    this.model = config.model;
+    this.client = createOpenAICompatibleClient();
 
-    this.client = new OpenAI({
-      baseURL,
-      apiKey,
+    console.log("Using OpenAI-compatible LLM config:", {
+      baseURL: config.baseURL || "https://api.openai.com/v1",
+      model: config.model,
     });
   }
 
@@ -94,6 +133,33 @@ export class ChatEngine {
   setEvolutionEngine(engine: IEvolutionEngine): void {
     this.evolutionEngine = engine;
     console.log("[ChatEngine] EvolutionEngine attached");
+  }
+
+  /**
+   * 对第三方 OpenAI-compatible 网关做轻量重试，降低偶发 5xx / 网络抖动导致的整轮对话失败概率。
+   */
+  private async createChatCompletion(
+    request: ChatCompletionCreateParamsNonStreaming,
+  ): Promise<ChatCompletion> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= CHAT_RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        return await this.client.chat.completions.create(request);
+      } catch (error: unknown) {
+        lastError = error;
+
+        if (attempt === CHAT_RETRY_DELAYS_MS.length || !isRetryableLLMError(error)) {
+          throw error;
+        }
+
+        const delay = CHAT_RETRY_DELAYS_MS[attempt] ?? 0;
+        console.warn(`[ChatEngine] LLM request failed, retrying in ${delay}ms`, error);
+        await sleep(delay);
+      }
+    }
+
+    throw lastError;
   }
 
   setTools(tools: any[]): void {
@@ -159,8 +225,8 @@ export class ChatEngine {
 
         console.log("[DEBUG] iteration:", iterations, "tools:", this.tools.length);
 
-        const response = await this.client.chat.completions.create({
-          model: process.env.MODEL || "qwen-plus",
+        const response = await this.createChatCompletion({
+          model: this.model,
           messages,
           tools: this.tools.length > 0 ? this.tools : undefined,
           temperature: 0.7,
@@ -237,10 +303,10 @@ export class ChatEngine {
           this.workingMemory.compress(sessionId, async (msgs) => {
             const texts = msgs.map(m => `${m.role}: ${m.content.slice(0, 200)}`).join("\n");
             try {
-              const res = await this.client.chat.completions.create({
-                model: process.env.MODEL || "qwen-plus",
-                messages: [
-                  { role: "system", content: "请用简洁的中文总结以下对话历史的要点，保留关键信息。输出纯文本，不超过 500 字。" },
+               const res = await this.createChatCompletion({
+                 model: this.model,
+                 messages: [
+                   { role: "system", content: "请用简洁的中文总结以下对话历史的要点，保留关键信息。输出纯文本，不超过 500 字。" },
                   { role: "user", content: texts },
                 ],
                 temperature: 0.3,
@@ -540,4 +606,3 @@ export class ChatEngine {
     return this.getHistory(sessionId);
   }
 }
-

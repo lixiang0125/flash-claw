@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { Logger } from "../core/container/tokens";
 import type { ConversationMessage } from "./working-memory";
+import { createOpenAICompatibleClient, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 /**
  * Pre-compaction memory flush agent.
@@ -23,13 +24,8 @@ export class DailySummarizer {
 
   constructor(logger: Logger) {
     this.logger = logger;
-    this.model = process.env.MODEL || "qwen3.5-plus";
-    this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || "",
-      baseURL:
-        process.env.OPENAI_BASE_URL ||
-        "https://coding.dashscope.aliyuncs.com/v1",
-    });
+    this.model = resolveOpenAICompatibleConfig().model;
+    this.client = createOpenAICompatibleClient();
   }
 
   /**
