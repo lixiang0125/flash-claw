@@ -72,6 +72,16 @@ function createMockClient(content: string = "你好，我是助手。", toolCall
   };
 }
 
+function createMockStream(chunks: unknown[]) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+    },
+  };
+}
+
 /** 向 chatEngine 注入所有依赖并替换 OpenAI client */
 function wireEngine(opts?: {
   wm?: WorkingMemory;
@@ -360,6 +370,121 @@ describe("ChatEngine", () => {
       wireEngine({ mm, client: createMockClient("好的") });
       await chatEngine.chat({ message: "你记得吗", sessionId: "s-recall", userId: "u1" });
       expect(mm.recall).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // chatStream() — 流式对话与工具调用
+  // =========================================================================
+  describe("chatStream() — 流式对话与工具调用", () => {
+    it("chatStream() 正常流式输出文本并触发 onDone", async () => {
+      const streamClient = {
+        chat: {
+          completions: {
+            create: mock(() => Promise.resolve(createMockStream([
+              { choices: [{ delta: { content: "你好" } }] },
+              { choices: [{ delta: { content: "，世界" } }] },
+            ]))),
+          },
+        },
+      };
+      const onDelta = mock(() => Promise.resolve());
+      const onDone = mock(() => Promise.resolve());
+
+      wireEngine({ client: streamClient as any });
+      const r = await chatEngine.chatStream(
+        { message: "流式测试", sessionId: "s-stream-basic" },
+        { onDelta, onDone },
+      );
+
+      expect(r.response).toBe("你好，世界");
+      expect(onDelta.mock.calls.length).toBe(2);
+      expect(onDone).toHaveBeenCalledWith("你好，世界");
+    });
+
+    it("chatStream() 在流式模式下处理 tool_calls 并执行工具", async () => {
+      const te = createMockToolExecutor();
+      let callCount = 0;
+      const streamClient = {
+        chat: {
+          completions: {
+            create: mock(() => {
+              callCount++;
+
+              if (callCount === 1) {
+                return Promise.resolve(createMockStream([
+                  {
+                    choices: [{
+                      delta: {
+                        tool_calls: [{
+                          index: 0,
+                          id: "call_stream_1",
+                          type: "function",
+                          function: { name: "web_search", arguments: '{"query":"美伊' },
+                        }],
+                      },
+                    }],
+                  },
+                  {
+                    choices: [{
+                      delta: {
+                        tool_calls: [{
+                          index: 0,
+                          function: { arguments: '战争"}' },
+                        }],
+                      },
+                    }],
+                  },
+                ]));
+              }
+
+              return Promise.resolve(createMockStream([
+                { choices: [{ delta: { content: "新闻一" } }] },
+                { choices: [{ delta: { content: "、新闻二、新闻三" } }] },
+              ]));
+            }),
+          },
+        },
+      };
+      const onDelta = mock(() => Promise.resolve());
+      const onDone = mock(() => Promise.resolve());
+
+      wireEngine({
+        te,
+        client: streamClient as any,
+        tools: [{ type: "function", function: { name: "web_search", description: "搜索互联网" } }],
+      });
+
+      const r = await chatEngine.chatStream(
+        { message: "搜索新闻", sessionId: "s-stream-tool" },
+        { onDelta, onDone },
+      );
+
+      expect(te).toHaveBeenCalledWith("web_search", { query: "美伊战争" }, "s-stream-tool");
+      expect(streamClient.chat.completions.create).toHaveBeenCalledTimes(2);
+      expect(r.response).toBe("新闻一、新闻二、新闻三");
+      expect(onDelta.mock.calls.length).toBe(2);
+      expect(onDelta.mock.calls[1]?.[1]).toBe("新闻一、新闻二、新闻三");
+      expect(onDone).toHaveBeenCalledWith("新闻一、新闻二、新闻三");
+    });
+
+    it("buildSystemPrompt() 自动包含 browser 工具说明和多步工作流约束", () => {
+      chatEngine.setTools([
+        { type: "function", function: { name: "browser", description: "通过本地 Chrome 控制真实浏览器" } },
+        { type: "function", function: { name: "web_search", description: "搜索互联网" } },
+      ]);
+
+      const prompt = (chatEngine as any).buildSystemPrompt([]);
+      expect(prompt).toContain("browser");
+      expect(prompt).toContain("通过本地 Chrome 控制真实浏览器");
+      expect(prompt).toContain("浏览器任务必须完成到用户目标为止");
+      expect(prompt).toContain("仅执行 `goto` 打开页面不算完成");
+      expect(prompt).toContain("优先使用 `browser`");
+      expect(prompt).toContain("`search` 动作");
+      expect(prompt).toContain("使用浏览器打开 baidu.com，搜索美伊战争");
+      expect(prompt).toContain("不传 `selector` 即可读取整页");
+      expect(prompt).toContain("type");
+      expect(prompt).toContain("wait_for");
     });
   });
 

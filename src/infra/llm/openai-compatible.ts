@@ -6,6 +6,23 @@ export interface OpenAICompatibleConfig {
   model: string;
 }
 
+/**
+ * 部分 OpenAI-compatible 网关会把 JSON 响应作为字符串返回；
+ * 这里统一做一次兜底解析，避免上层直接读取 `choices[0]` 时崩溃。
+ */
+export function normalizeOpenAICompatiblePayload<T>(payload: T | string, operation: string): T {
+  if (typeof payload !== "string") {
+    return payload;
+  }
+
+  try {
+    return JSON.parse(payload) as T;
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${operation} returned a string payload that could not be parsed: ${reason}`);
+  }
+}
+
 function readEnvValue(names: string[]): string | undefined {
   for (const name of names) {
     const value = process.env[name]?.trim();

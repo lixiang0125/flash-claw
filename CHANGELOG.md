@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-03-28 (27)
+
+### fix: 飞书流式路径支持工具调用，并同步暴露 browser 到系统提示词
+
+- `src/chat/engine.ts` 为 `chatStream()` 补齐与非流式一致的工具循环，流式模式下也能执行 `browser`、`web_search` 等工具。
+- `src/chat/chatStream.ts` 新增流式 `tool_calls` 片段重组逻辑，支持边收流边识别函数调用。
+- 系统提示词改为根据已注册工具动态生成，避免 `browser` 等新工具遗漏在 prompt 里。
+- 新增 `tests/engine.test.ts` 回归用例，覆盖流式文本、流式工具调用和 `browser` prompt 暴露场景。
+
+### tweak: 强化 browser 多步工作流提示，避免只停在打开首页
+
+- `src/chat/engine.ts` 新增浏览器任务约束：用户明确要求使用浏览器时，必须持续执行到目标完成，不能只做 `goto`。
+- `src/tools/builtin/browser.ts` 与 `src/tools/builtin/web-search.ts` 更新工具描述，明确浏览器任务优先级和默认搜索流程。
+- `tests/engine.test.ts` 增加断言，确保 prompt 中包含“输入关键词 → 提交搜索 → 等待结果 → 提取内容”的多步指导。
+
+### feat: browser 新增 search 动作，直接执行站内搜索
+
+- `src/tools/builtin/browser.ts` 新增 `search` 动作定义，支持在当前页面或指定 URL 中直接完成输入关键词和提交搜索。
+- `scripts/browser-cdp-helper.mjs` 增加常见搜索框启发式定位与结果页文本提取，减少模型只停在首页的问题。
+- `tests/browser-tool.test.ts` 新增回归用例，确保搜索关键词会透传到 browser helper。
+
+### fix: browser 整页读取和 mem0 兼容网关响应解析
+
+- `browser.text` 现在允许不传 `selector`，默认读取整页 `body`，避免模型在结果页提取内容时因缺少选择器报错。
+- `src/infra/llm/openai-compatible.ts` 新增兼容解析函数，处理部分 OpenAI-compatible 网关把 JSON 响应包装成字符串的情况。
+- `src/memory/mem0-factory.ts` 为 mem0 内部 LLM client 注入响应归一化，减少 `choices[0]` 读取失败导致的记忆写入报错。
+
 ## 2026-03-27 (26)
 
 ### refactor: 统一 OpenAI-compatible LLM 配置，移除 Qwen 写死默认值

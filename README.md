@@ -374,6 +374,8 @@ Flash-Claw 会优先尝试接管你本机已开启 CDP 的 Chrome；如果本地
 
 实现上由 Bun 侧负责会话和端口管理，真实 CDP 操作通过 Node helper 调用 Playwright 完成，避免 Bun 运行时下的 CDP 连接兼容性问题。
 
+当用户明确要求“使用浏览器”完成网页任务时，智能体会优先持续调用 `browser` 执行完整工作流：打开页面、观察页面内容、输入关键词、点击或回车提交、等待结果并读取结果页，而不是只停留在 `goto` 或退化成 `web_search`。
+
 如果你希望显式指定浏览器可执行文件或调试地址，可使用以下环境变量：
 
 ```bash
@@ -381,7 +383,11 @@ CHROME_PATH=/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
 BROWSER_CDP_URL=http://127.0.0.1:9222
 ```
 
-随后可通过 `browser` 工具执行 `status`、`goto`、`click`、`type`、`press`、`text`、`html`、`evaluate`、`screenshot`、`wait_for`、`select_tab`、`reset` 等动作。
+随后可通过 `browser` 工具执行 `status`、`goto`、`search`、`click`、`type`、`press`、`text`、`html`、`evaluate`、`screenshot`、`wait_for`、`select_tab`、`reset` 等动作。
+
+其中 `search` 适合“打开搜索引擎并输入关键词”的场景，会优先尝试在当前页面或指定 URL 中定位搜索框、输入关键词并提交搜索。
+
+`text` 与 `html` 也支持不传 `selector` 直接读取整页内容，便于模型在未知页面结构下先观察页面，再决定后续的输入和点击动作。
 
 #### 工具执行流程
 
@@ -514,6 +520,8 @@ Flash-Claw 支持两种飞书接入模式：
 
 飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
 
+- 流式路径会继续执行 Tool Calling，`browser`、`web_search`、任务调度等能力在飞书流式模式下同样可用
+
 #### 双模式自动切换
 
 | 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
@@ -536,6 +544,8 @@ FEISHU_SHOW_ELAPSED=true           # 显示耗时统计（默认 true）
 ### 流式卡片输出
 
 飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
+
+- 流式路径会继续执行 Tool Calling，`browser`、`web_search`、任务调度等能力在飞书流式模式下同样可用
 
 #### 双模式自动切换
 

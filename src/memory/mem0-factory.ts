@@ -2,7 +2,43 @@ import { Memory } from "mem0ai/oss";
 import { patchEmbedderBaseURL, patchEmbedderLocal } from "./mem0-embedder-patch";
 import { LocalTransformersEmbedder } from "./local-embedder";
 import type { Logger } from "../core/container/tokens";
-import { resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
+import { normalizeOpenAICompatiblePayload, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
+
+interface Mem0ChatCompletionsClient {
+  create: (request: unknown) => Promise<unknown>;
+}
+
+interface Mem0OpenAIClient {
+  chat?: {
+    completions?: Mem0ChatCompletionsClient;
+  };
+}
+
+interface Mem0LLMWithOpenAI {
+  openai?: Mem0OpenAIClient;
+}
+
+function patchMem0CompletionClient(llm: Mem0LLMWithOpenAI | undefined, logger: Logger, label: string): void {
+  const completions = llm?.openai?.chat?.completions;
+  if (!completions) {
+    return;
+  }
+
+  const originalCreate = completions.create;
+
+  // 兼容部分网关返回 JSON 字符串的情况，避免 mem0 内部直接读取 choices[0] 崩溃。
+  completions.create = async (request: unknown): Promise<unknown> => {
+    const rawResponse = await originalCreate.call(completions, request);
+    try {
+      return normalizeOpenAICompatiblePayload(rawResponse, `${label} chat.completions.create`);
+    } catch (error: unknown) {
+      logger.warn(`${label} completion payload normalization failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  };
+}
 
 /** Known local models and their output dimensions. */
 const LOCAL_MODEL_DIMS: Record<string, number> = {
@@ -215,6 +251,12 @@ export function createMem0Memory(
       `mem0 embedder patched → remote ${opts.embeddingModel} @ ${opts.embeddingBaseURL}`,
     );
   }
+
+  patchMem0CompletionClient(
+    (memory as unknown as { llm?: Mem0LLMWithOpenAI }).llm,
+    logger,
+    "mem0",
+  );
 
   logger.info("mem0 Memory initialized successfully");
   return memory;

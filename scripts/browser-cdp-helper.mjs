@@ -62,6 +62,73 @@ async function buildOutput(action, endpointUrl, page, pageIndex, context, extras
   };
 }
 
+function getSearchFieldCandidates(currentUrl, explicitSelector) {
+  if (explicitSelector) {
+    return [explicitSelector];
+  }
+
+  const hostname = (() => {
+    try {
+      return new URL(currentUrl).hostname;
+    } catch {
+      return "";
+    }
+  })();
+
+  const candidates = [];
+
+  // 针对常见搜索引擎优先尝试稳定选择器，再回退到通用输入框启发式。
+  if (hostname.includes("baidu.com")) {
+    candidates.push("#kw", "input[name='wd']", "textarea[name='wd']");
+  }
+
+  if (hostname.includes("google.")) {
+    candidates.push("textarea[name='q']", "input[name='q']");
+  }
+
+  if (hostname.includes("bing.com") || hostname.includes("yahoo.com")) {
+    candidates.push("input[name='q']");
+  }
+
+  candidates.push(
+    "input[type='search']",
+    "input[role='searchbox']",
+    "textarea[role='searchbox']",
+    "form input[type='text']",
+    "form textarea",
+    "input[type='text']",
+    "textarea",
+  );
+
+  return candidates;
+}
+
+async function resolveSearchField(page, explicitSelector, timeoutMs) {
+  const candidates = getSearchFieldCandidates(page.url(), explicitSelector);
+
+  for (const selector of candidates) {
+    const locator = page.locator(selector).first();
+
+    try {
+      await locator.waitFor({ state: "visible", timeout: Math.min(timeoutMs, 2000) });
+      return { locator, selector };
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error("Could not locate a visible search field on the current page.");
+}
+
+async function extractPageText(page, timeoutMs) {
+  try {
+    const text = await page.locator("body").innerText({ timeout: Math.min(timeoutMs, 5000) });
+    return text.trim().slice(0, 4000);
+  } catch {
+    return "";
+  }
+}
+
 async function main() {
   const rawInput = await new Promise((resolve, reject) => {
     let source = "";
@@ -108,6 +175,30 @@ async function main() {
         break;
       }
 
+      case "search": {
+        const value = requireField(input.value, "value");
+
+        if (input.url) {
+          await page.goto(input.url, { waitUntil: "networkidle", timeout: timeoutMs });
+        }
+
+        const { locator, selector } = await resolveSearchField(page, input.selector, timeoutMs);
+
+        await locator.click({ timeout: timeoutMs });
+        await locator.fill(value, { timeout: timeoutMs });
+        await Promise.allSettled([
+          page.waitForLoadState("networkidle", { timeout: timeoutMs }),
+          locator.press(input.key || "Enter", { timeout: timeoutMs }),
+        ]);
+        await page.waitForTimeout(500);
+
+        result = await buildOutput("search", input.endpointUrl, page, pageIndex, context, {
+          message: `Searched for \"${value}\" using ${selector}`,
+          text: await extractPageText(page, timeoutMs),
+        });
+        break;
+      }
+
       case "click": {
         const selector = requireField(input.selector, "selector");
         await page.locator(selector).first().click({ timeout: timeoutMs });
@@ -150,9 +241,14 @@ async function main() {
       }
 
       case "text": {
-        const selector = requireField(input.selector, "selector");
+        const selector = input.selector || "body";
         const text = (await page.locator(selector).first().innerText({ timeout: timeoutMs })).trim();
-        result = await buildOutput("text", input.endpointUrl, page, pageIndex, context, { text });
+        result = await buildOutput("text", input.endpointUrl, page, pageIndex, context, {
+          text,
+          message: input.selector
+            ? `Extracted text from ${selector}`
+            : "Extracted text from the full page body",
+        });
         break;
       }
 

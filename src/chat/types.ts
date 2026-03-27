@@ -16,7 +16,8 @@ export interface ChatResponse {
 
 /**
  * 流式聊天回调接口。
- * ChatEngine.chatStream() 通过此回调逐步推送文本片段。
+ * ChatEngine.chatStream() 通过此回调逐步推送文本片段；若中途触发工具调用，
+ * 会在工具执行完成后继续推送后续文本，并在最终回复结束时触发 onDone。
  */
 export interface StreamCallbacks {
   /** 每当收到新的文本 delta 时触发，fullText 为累积的完整文本 */

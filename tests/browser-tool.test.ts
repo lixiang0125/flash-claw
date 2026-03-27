@@ -83,6 +83,38 @@ describe("browserTool", () => {
     expect(result.message).toContain("Navigated");
   });
 
+  test("search forwards keyword to helper for in-browser search flow", async () => {
+    const result = await browserTool.execute({
+      action: "search",
+      url: "https://www.baidu.com",
+      value: "美伊战争",
+      newPage: true,
+    }, context);
+
+    expect(runHelperMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "search",
+        url: "https://www.baidu.com",
+        value: "美伊战争",
+        newPage: true,
+      }),
+      15000,
+    );
+    expect(result.action).toBe("search");
+  });
+
+  test("text can read the full page body without selector", async () => {
+    const result = await browserTool.execute({ action: "text" }, context);
+
+    expect(runHelperMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "text",
+      }),
+      15000,
+    );
+    expect(result.action).toBe("text");
+  });
+
   test("auto-starts managed Chrome when local endpoint is unavailable", async () => {
     process.env.CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 

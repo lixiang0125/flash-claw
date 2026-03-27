@@ -12,7 +12,7 @@ import { ErrorSanitizer } from "../infra/error-handler";
 import type { WorkingMemory, ConversationMessage } from "../memory/working-memory";
 import type { IEvolutionEngine } from "../core/container/tokens";
 import { streamChat } from "./chatStream";
-import { createOpenAICompatibleClient, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
+import { createOpenAICompatibleClient, normalizeOpenAICompatiblePayload, resolveOpenAICompatibleConfig } from "../infra/llm/openai-compatible";
 
 const MAX_STEPS = 10;
 const CHAT_RETRY_DELAYS_MS = [300, 900] as const;
@@ -23,6 +23,38 @@ interface ChatMessage {
   tool_call_id?: string;
   toolName?: string;
   name?: string;
+}
+
+interface LLMMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: AssistantToolCall[];
+  tool_call_id?: string;
+  toolName?: string;
+  name?: string;
+}
+
+interface AssistantToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+interface LLMToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters?: unknown;
+  };
+}
+
+interface ToolExecutorResult {
+  result: unknown;
+  error?: string;
 }
 
 interface RetryableLLMError {
@@ -78,13 +110,23 @@ function wmToChat(msgs: ConversationMessage[]): ChatMessage[] {
   }));
 }
 
+function chatToLLMMessages(msgs: ChatMessage[]): LLMMessage[] {
+  return msgs.map((message) => ({
+    role: message.role,
+    content: message.content,
+    tool_call_id: message.tool_call_id,
+    name: message.name,
+    toolName: message.toolName,
+  }));
+}
+
 /** 聊天引擎 —— 核心对话处理模块，负责 LLM 交互、工具调用、记忆检索与任务调度。 */
 export class ChatEngine {
   private client: OpenAI;
   private model: string;
   private sessionSkills: Map<string, Skill[]> = new Map();
-  private tools: any[] = [];
-  private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>) | null = null;
+  private tools: LLMToolDefinition[] = [];
+  private toolExecutor: ((name: string, args: Record<string, unknown>, sessionId: string) => Promise<ToolExecutorResult>) | null = null;
   private memoryManager: IMemoryManager | null = null;
   private taskSchedulerAPI: TaskSchedulerAPI | null = null;
 
@@ -145,7 +187,11 @@ export class ChatEngine {
 
     for (let attempt = 0; attempt <= CHAT_RETRY_DELAYS_MS.length; attempt++) {
       try {
-        return await this.client.chat.completions.create(request);
+        const response = await this.client.chat.completions.create(request);
+        return normalizeOpenAICompatiblePayload<ChatCompletion>(
+          response as ChatCompletion | string,
+          "Chat completion",
+        );
       } catch (error: unknown) {
         lastError = error;
 
@@ -162,13 +208,142 @@ export class ChatEngine {
     throw lastError;
   }
 
-  setTools(tools: any[]): void {
+  setTools(tools: LLMToolDefinition[]): void {
     this.tools = tools;
     console.log("[DEBUG] setTools called with:", tools.length, "tools");
   }
 
-  setToolExecutor(executor: (name: string, args: Record<string, unknown>, sessionId: string) => Promise<{ result: unknown; error?: string }>): void {
+  setToolExecutor(executor: (name: string, args: Record<string, unknown>, sessionId: string) => Promise<ToolExecutorResult>): void {
     this.toolExecutor = executor;
+  }
+
+  private normalizeToolCalls(toolCalls: unknown): AssistantToolCall[] {
+    if (!Array.isArray(toolCalls)) {
+      return [];
+    }
+
+    const normalizedToolCalls: AssistantToolCall[] = [];
+
+    for (const toolCall of toolCalls) {
+      if (typeof toolCall !== "object" || toolCall === null) {
+        continue;
+      }
+
+      const toolCallRecord = toolCall as Record<string, unknown>;
+      const functionRecord = typeof toolCallRecord["function"] === "object" && toolCallRecord["function"] !== null
+        ? toolCallRecord["function"] as Record<string, unknown>
+        : null;
+      const id = typeof toolCallRecord["id"] === "string" ? toolCallRecord["id"] : "";
+      const type = toolCallRecord["type"] === "function" ? "function" : null;
+      const name = typeof functionRecord?.["name"] === "string" ? functionRecord["name"] : "";
+      const argumentsText = typeof functionRecord?.["arguments"] === "string"
+        ? functionRecord["arguments"]
+        : "";
+
+      if (!id || !type || !name) {
+        continue;
+      }
+
+      normalizedToolCalls.push({
+        id,
+        type,
+        function: {
+          name,
+          arguments: argumentsText,
+        },
+      });
+    }
+
+    return normalizedToolCalls;
+  }
+
+  private parseToolArguments(rawArguments: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(rawArguments || "{}");
+      return typeof parsed === "object" && parsed !== null
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * 统一执行 assistant 返回的工具调用，并把结果回填到消息上下文中。
+   */
+  private async executeToolCalls(
+    messages: LLMMessage[],
+    toolCalls: AssistantToolCall[],
+    sessionId: string,
+  ): Promise<void> {
+    for (const toolCall of toolCalls) {
+      const toolName = toolCall.function.name;
+      const args = this.parseToolArguments(toolCall.function.arguments);
+
+      console.log("[TOOL_CALL]", toolName, JSON.stringify(args).substring(0, 100));
+
+      let toolResult: ToolExecutorResult = { result: null, error: "Tool executor not configured" };
+
+      if (this.toolExecutor) {
+        try {
+          toolResult = await this.toolExecutor(toolName, args, sessionId);
+        } catch (error: unknown) {
+          toolResult = {
+            result: null,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+
+      const toolOutput = typeof toolResult.result === "string"
+        ? toolResult.result
+        : JSON.stringify(toolResult.result) ?? "null";
+
+      console.log("[TOOL_RESULT]", toolName, toolResult.error ? `ERROR: ${toolResult.error}` : "OK");
+      console.log("[TOOL_RESULT_CONTENT]", toolName, (toolOutput || "").substring(0, 200));
+
+      messages.push({
+        role: "tool",
+        content: toolResult.error || toolOutput,
+        tool_call_id: toolCall.id,
+        name: toolName,
+      });
+    }
+  }
+
+  private buildToolPromptSection(): string {
+    if (this.tools.length === 0) {
+      return "## 工具使用\n- 当前无可用工具。";
+    }
+
+    return [
+      "## 可用工具 (请使用 Tool Calling 方式调用)",
+      "",
+      ...this.tools.map((tool) => `- ${tool.function.name}: ${tool.function.description}`),
+      "",
+      "重要：不要询问用户，自己决定并调用工具。",
+    ].join("\n");
+  }
+
+  /**
+   * 浏览器任务需要额外约束，避免模型只打开页面就提前结束。
+   */
+  private buildBrowserWorkflowSection(): string {
+    const hasBrowserTool = this.tools.some((tool) => tool.function.name === "browser");
+    if (!hasBrowserTool) {
+      return "";
+    }
+
+    return [
+      "## 浏览器任务要求",
+      "- 用户明确要求使用浏览器、打开网页、点击页面或在站内搜索时，优先使用 `browser`，不要退化成 `web_search`。",
+      "- 浏览器任务必须完成到用户目标为止；仅执行 `goto` 打开页面不算完成。",
+      "- 如果任务是“打开搜索引擎并搜索关键词”，优先使用 `browser` 的 `search` 动作，一次性完成打开页面、输入关键词并提交搜索。",
+      "- 搜索类网页任务的默认流程：优先 `search`；如果必须拆步，再按 `goto` 打开页面 -> 必要时用 `text` 或 `html` 观察页面 -> `type` 输入关键词 -> `press` Enter 或 `click` 搜索按钮 -> `wait_for` 等待结果 -> `text` 提取并整理答案。",
+      "- 示例：用户说“使用浏览器打开 baidu.com，搜索美伊战争”，首选调用 `browser`，参数类似 `{\"action\":\"search\",\"url\":\"https://www.baidu.com\",\"value\":\"美伊战争\",\"newPage\":true}`。",
+      "- 当需要阅读当前页整体内容时，可以直接调用 `browser` 的 `text` 或 `html`，不传 `selector` 即可读取整页。",
+      "- 如果选择器不确定，先继续用 `text` 或 `html` 观察页面，再决定下一步操作。",
+    ].join("\n");
   }
 
   /** 处理一次完整的对话请求：构建上下文 → LLM 推理 → 工具循环 → 持久化记忆 */
@@ -202,7 +377,7 @@ export class ChatEngine {
 
       const systemPrompt = this.buildSystemPrompt(skills) + relevantMemories;
 
-      const messages: any[] = [
+      const messages: LLMMessage[] = [
         { role: "system", content: systemPrompt },
         ...history,
         { role: "user", content: message },
@@ -227,61 +402,31 @@ export class ChatEngine {
 
         const response = await this.createChatCompletion({
           model: this.model,
-          messages,
-          tools: this.tools.length > 0 ? this.tools : undefined,
+          messages: messages as ChatCompletionCreateParamsNonStreaming["messages"],
+          tools: (this.tools.length > 0 ? this.tools : undefined) as never,
           temperature: 0.7,
         });
 
         const assistantMsg = response.choices[0]?.message;
         const text = assistantMsg?.content || "";
+        const toolCalls = this.normalizeToolCalls(assistantMsg?.tool_calls);
         lastResponse = text;
 
         console.log("[DEBUG] assistant content:", text.substring(0, 100));
-        console.log("[DEBUG] tool_calls:", assistantMsg?.tool_calls?.length || 0);
+        console.log("[DEBUG] tool_calls:", toolCalls.length);
 
-        if (!assistantMsg?.tool_calls || assistantMsg.tool_calls.length === 0) {
+        if (toolCalls.length === 0) {
           messages.push({ role: "assistant", content: text });
           break;
         }
 
         messages.push({
           role: "assistant",
-          content: text,
-          tool_calls: assistantMsg.tool_calls,
+          content: text || null,
+          tool_calls: toolCalls,
         });
 
-        for (const tc of assistantMsg.tool_calls!) {
-          const toolName = (tc as any).function.name;
-
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse((tc as any).function.arguments || "{}");
-          } catch {
-            args = {};
-          }
-
-          console.log("[TOOL_CALL]", toolName, JSON.stringify(args).substring(0, 100));
-
-          let toolResult: any = { result: null, error: "Tool executor not configured" };
-
-          if (this.toolExecutor) {
-            try {
-              toolResult = await this.toolExecutor(toolName, args, sessionId);
-            } catch (error) {
-              toolResult = { result: null, error: String(error) };
-            }
-          }
-
-          console.log("[TOOL_RESULT]", toolName, toolResult.error ? `ERROR: ${toolResult.error}` : "OK");
-          console.log("[TOOL_RESULT_CONTENT]", toolName, (toolResult.result || "").substring(0, 200));
-
-          messages.push({
-            role: "tool",
-            content: toolResult.error || JSON.stringify(toolResult.result),
-            tool_call_id: tc.id,
-            name: toolName,
-          });
-        }
+        await this.executeToolCalls(messages, toolCalls, sessionId);
 
         if (iterations >= MAX_STEPS - 1) {
           break;
@@ -373,21 +518,12 @@ export class ChatEngine {
       prompt += `\n\nAvailable skills:\n${skillDescriptions}`;
     }
 
-    const toolDescriptions = [
-      "## 可用工具 (请使用 Tool Calling 方式调用)",
-      "",
-      "- web_search(query: string): 搜索互联网并获取结果",
-      "- read_file(path: string): 读取文件",
-      "- write_file(path: string, content: string): 写入文件",
-      "- edit_file(path: string, oldString: string, newString: string): 编辑文件",
-      "- bash(command: string): 执行命令",
-      "- glob(pattern: string): 搜索文件",
-      "- grep(query: string, path?: string): 搜索内容",
-      "",
-      "重要：不要询问用户，自己决定并调用工具。",
-    ].join("\n");
+    prompt += `\n\n${this.buildToolPromptSection()}`;
 
-    prompt += `\n\n${toolDescriptions}`;
+    const browserWorkflowSection = this.buildBrowserWorkflowSection();
+    if (browserWorkflowSection) {
+      prompt += `\n\n${browserWorkflowSection}`;
+    }
 
     // 注入自进化策略的 prompt 增强指令
     const evolutionHints = this.evolutionEngine?.getPromptEnhancements() || "";
@@ -446,9 +582,9 @@ export class ChatEngine {
   }
 
   /** 从 WorkingMemory 获取会话历史（单一数据源），不再使用本地 Map */
-  private getHistory(sessionId: string): ChatMessage[] {
+  private getHistory(sessionId: string): LLMMessage[] {
     if (this.workingMemory) {
-      return wmToChat(this.workingMemory.getMessages(sessionId));
+      return chatToLLMMessages(wmToChat(this.workingMemory.getMessages(sessionId)));
     }
     // Fallback: no WorkingMemory wired yet (shouldn't happen after bootstrap)
     return [];
@@ -480,7 +616,7 @@ export class ChatEngine {
    * 与 chat() 的区别：
    * - 使用 OpenAI stream 模式，逐 token 推送
    * - 通过 StreamCallbacks 回调通知调用方（如 FeishuBot 流式卡片）
-   * - 不执行工具调用循环（流式场景优先返回文本）
+   * - 支持在流式模式下继续执行工具调用循环
    * - 持久化逻辑与 chat() 一致
    */
   async chatStream(
@@ -538,7 +674,7 @@ export class ChatEngine {
       // ── Phase 2: 构建提示词 ──
       const tPrompt = Date.now();
       const systemPrompt = this.buildSystemPrompt(skills) + relevantMemories;
-      const messages: any[] = [
+      const messages: LLMMessage[] = [
         { role: "system", content: systemPrompt },
         ...history,
         { role: "user", content: message },
@@ -552,9 +688,10 @@ export class ChatEngine {
       }
       console.log(`[chatStream] ⏱ prompt build=${Date.now() - tPrompt}ms, context msgs=${messages.length}${taskResult ? ", task created" : ""}`);
 
-      // ── Phase 3: 流式 LLM 调用 ──
+      // ── Phase 3: 流式 LLM 调用 + 工具循环 ──
       const tLLM = Date.now();
       let firstTokenTime = 0;
+      let streamedText = "";
       const wrappedCallbacks: StreamCallbacks = {
         onDelta: async (delta, fullText) => {
           if (!firstTokenTime) {
@@ -566,11 +703,45 @@ export class ChatEngine {
         onDone: callbacks.onDone,
         onError: callbacks.onError,
       };
-      const fullText = await streamChat(
-        this.client,
-        messages,
-        wrappedCallbacks,
-      );
+      let fullText = "";
+      let iterations = 0;
+
+      while (iterations < MAX_STEPS) {
+        iterations++;
+
+        const streamResult = await streamChat(
+          this.client,
+          messages,
+          wrappedCallbacks,
+          this.model,
+          this.tools.length > 0 ? this.tools : undefined,
+          streamedText,
+        );
+        const toolCalls = this.normalizeToolCalls(streamResult.toolCalls);
+
+        streamedText += streamResult.content;
+        console.log("[chatStream] tool_calls:", toolCalls.length);
+
+        if (toolCalls.length === 0) {
+          fullText = streamedText;
+          messages.push({ role: "assistant", content: streamResult.content });
+          break;
+        }
+
+        messages.push({
+          role: "assistant",
+          content: streamResult.content || null,
+          tool_calls: toolCalls,
+        });
+        await this.executeToolCalls(messages, toolCalls, sessionId);
+
+        if (iterations >= MAX_STEPS - 1) {
+          fullText = streamedText;
+          break;
+        }
+      }
+
+      await callbacks.onDone(fullText);
       const tLLMDone = Date.now();
       console.log(`[chatStream] ⏱ LLM total=${tLLMDone - tLLM}ms, output=${fullText.length} chars`);
 
@@ -603,6 +774,6 @@ export class ChatEngine {
 
 
   getHistoryMessages(sessionId: string): ChatMessage[] {
-    return this.getHistory(sessionId);
+    return wmToChat(this.workingMemory?.getMessages(sessionId) ?? []);
   }
 }

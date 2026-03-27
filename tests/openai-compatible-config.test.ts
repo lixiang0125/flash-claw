@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { resolveOpenAICompatibleConfig } from "../src/infra/llm/openai-compatible";
+import { normalizeOpenAICompatiblePayload, resolveOpenAICompatibleConfig } from "../src/infra/llm/openai-compatible";
 
 const envKeys = [
   "OPENAI_API_KEY",
@@ -79,5 +79,21 @@ describe("resolveOpenAICompatibleConfig", () => {
     expect(config.apiKey).toBe("");
     expect(config.baseURL).toBeUndefined();
     expect(config.model).toBe("gpt-4o-mini");
+  });
+});
+
+describe("normalizeOpenAICompatiblePayload", () => {
+  it("returns objects unchanged", () => {
+    const payload = { choices: [{ message: { content: "ok" } }] };
+
+    expect(normalizeOpenAICompatiblePayload(payload, "test")).toEqual(payload);
+  });
+
+  it("parses JSON string payloads from compatibility gateways", () => {
+    const payload = '{"choices":[{"message":{"content":"ok"}}]}';
+
+    expect(normalizeOpenAICompatiblePayload<{ choices: Array<{ message: { content: string } }> }>(payload, "test")).toEqual({
+      choices: [{ message: { content: "ok" } }],
+    });
   });
 });

@@ -151,7 +151,7 @@ export const webSearchTool: FlashClawToolDefinition<typeof WebSearchInput, WebSe
   name: "web_search",
   description:
     "使用搜索引擎搜索互联网信息。返回相关网页的标题、URL 和摘要。" +
-    "适合查询实时信息、技术文档、问题解答等。",
+    "适合查询实时信息、技术文档、问题解答等；如果用户明确要求打开网页、点击页面或使用浏览器搜索，请优先改用 browser。",
   inputSchema: WebSearchInput,
   permissionLevel: "read",
   category: "web",

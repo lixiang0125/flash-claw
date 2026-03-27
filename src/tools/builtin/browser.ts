@@ -27,6 +27,7 @@ const NODE_HELPER_PATH = new URL("../../../scripts/browser-cdp-helper.mjs", impo
 type BrowserAction =
   | "status"
   | "goto"
+  | "search"
   | "click"
   | "type"
   | "press"
@@ -103,6 +104,7 @@ const BrowserInput: ZodType<BrowserToolInput> = z.object({
   action: z.enum([
     "status",
     "goto",
+    "search",
     "click",
     "type",
     "press",
@@ -117,8 +119,8 @@ const BrowserInput: ZodType<BrowserToolInput> = z.object({
   endpointUrl: z.string().url().optional().describe("本地 Chrome 的 CDP 地址，默认 http://127.0.0.1:9222"),
   pageIndex: z.number().int().min(0).optional().describe("标签页索引，从 0 开始"),
   url: z.string().url().optional().describe("目标 URL，goto 时必填"),
-  selector: z.string().optional().describe("CSS 选择器或 Playwright 兼容选择器"),
-  value: z.string().optional().describe("输入文本"),
+  selector: z.string().optional().describe("CSS 选择器或 Playwright 兼容选择器；text/html 未传时默认读取整页"),
+  value: z.string().optional().describe("输入文本；search 时表示搜索关键词"),
   key: z.string().optional().describe("键盘按键，例如 Enter"),
   script: z.string().optional().describe("在页面上下文执行的 JavaScript"),
   timeoutMs: z.number().int().min(100).max(120_000).optional().describe("等待超时时间（毫秒）"),
@@ -405,7 +407,11 @@ async function executeBrowserAction(input: BrowserToolInput, context: ToolExecut
     requireField(helperInput.url, "url");
   }
 
-  if (["click", "type", "text", "wait_for"].includes(helperInput.action)) {
+  if (helperInput.action === "search") {
+    requireField(helperInput.value, "value");
+  }
+
+  if (["click", "type", "wait_for"].includes(helperInput.action)) {
     requireField(helperInput.selector, "selector");
   }
 
@@ -435,7 +441,7 @@ async function executeBrowserAction(input: BrowserToolInput, context: ToolExecut
 export const browserTool: FlashClawToolDefinition<typeof BrowserInput, BrowserToolOutput> = {
   name: "browser",
   description:
-    "通过本地 Chrome 的 CDP 接口接管真实浏览器标签页，支持查看标签、导航、点击、输入、截图和执行页面脚本。",
+    "通过本地 Chrome 的 CDP 接口接管真实浏览器标签页，支持多步完成网页任务：打开页面、读取文本或 HTML、输入关键词、点击按钮、按键提交、等待结果、截图和执行页面脚本。支持 `search` 动作在当前页面或指定 URL 上直接完成站内搜索。用户要求使用浏览器时，应持续调用本工具直到任务完成，而不是只打开页面。",
   inputSchema: BrowserInput,
   permissionLevel: "execute",
   category: "integration",
@@ -446,6 +452,7 @@ export const browserTool: FlashClawToolDefinition<typeof BrowserInput, BrowserTo
   inputExamples: [
     { input: { action: "status" } },
     { input: { action: "goto", url: "https://example.com" } },
+    { input: { action: "search", url: "https://www.baidu.com", value: "美伊战争", newPage: true } },
     { input: { action: "click", selector: "text=Sign in" } },
     { input: { action: "type", selector: "input[name='q']", value: "flashclaw" } },
   ],
