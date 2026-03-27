@@ -58,6 +58,7 @@ import { globTool } from "../../tools/builtin/glob";
 import { grepTool } from "../../tools/builtin/grep";
 import { webSearchTool } from "../../tools/builtin/web-search";
 import { webFetchTool } from "../../tools/builtin/web-fetch";
+import { browserTool } from "../../tools/builtin/browser";
 import { ChatEngine } from "../../chat/engine";
 import { FeishuBot } from "../../integrations/feishu";
 import { TaskScheduler } from "../../tasks";
@@ -295,6 +296,7 @@ export function createContainer(): Container {
 
       // Register web_fetch (already exists in builtin but was not wired up)
       registry.register(webFetchTool);
+      registry.register(browserTool);
 
       return registry;
     },

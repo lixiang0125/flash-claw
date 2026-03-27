@@ -29,7 +29,7 @@
 - **对话引擎** — 多步工具循环、记忆检索、任务调度意图解析，一次对话即可完成复杂任务
 - **四级记忆系统** — T0 工作记忆 → T1 短期记忆 → T2 向量记忆 → T3 Markdown 记忆，兼顾速度与持久化
 - **自进化系统** — 对话反馈分析 + 进化策略规划，智能体可从交互中自主学习与改进
-- **8 个内置工具** — bash、文件读写编辑、glob/grep 搜索、Web 搜索与抓取
+- **9 个内置工具** — bash、文件读写编辑、glob/grep 搜索、Web 搜索抓取、本地浏览器 CDP 接管
 - **Skill 系统** — 兼容 Claude Code Agent Skills 标准，内置 10 个 Skill
 - **任务调度** — cron / interval / one-time 三种模式，LLM 智能解析多语言任务意图
 - **飞书集成** — Webhook + WebSocket 长连接双模式，流式卡片输出 + 耗时计时
@@ -81,6 +81,9 @@ MODEL=gpt-4o-mini
 
 # 可选
 TAVILY_API_KEY=tvly-xxxxx           # Web 搜索（Tavily）
+
+# 可选：本地浏览器 CDP 接管地址
+# BROWSER_CDP_URL=http://127.0.0.1:9222
 FEISHU_APP_ID=cli_xxxxx             # 飞书应用 ID
 FEISHU_APP_SECRET=xxxxx             # 飞书应用 Secret
 ```
@@ -351,7 +354,7 @@ data/
 
 ### 工具系统
 
-Flash-Claw 提供 8 个内置工具，覆盖文件操作、代码执行与信息检索：
+Flash-Claw 提供 9 个内置工具，覆盖文件操作、代码执行、信息检索与本地浏览器接管：
 
 | 工具 | 函数名 | 描述 | 安全等级 |
 |------|--------|------|----------|
@@ -363,6 +366,22 @@ Flash-Claw 提供 8 个内置工具，覆盖文件操作、代码执行与信息
 | **Grep** | `grep` | 文件内容正则搜索 | 低风险 |
 | **Web 搜索** | `web_search` | 互联网搜索（Tavily API） | 低风险 |
 | **Web 抓取** | `web_fetch` | 网页内容抓取（Playwright + Readability） | 低风险 |
+| **浏览器接管** | `browser` | 通过本地 Chrome CDP 操作真实浏览器标签页 | 高风险（需审批） |
+
+#### 本地浏览器接管（CDP）
+
+Flash-Claw 会优先尝试接管你本机已开启 CDP 的 Chrome；如果本地 `9222` 端口不可用，会自动拉起一个受控 Chrome 实例再连接。
+
+实现上由 Bun 侧负责会话和端口管理，真实 CDP 操作通过 Node helper 调用 Playwright 完成，避免 Bun 运行时下的 CDP 连接兼容性问题。
+
+如果你希望显式指定浏览器可执行文件或调试地址，可使用以下环境变量：
+
+```bash
+CHROME_PATH=/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
+BROWSER_CDP_URL=http://127.0.0.1:9222
+```
+
+随后可通过 `browser` 工具执行 `status`、`goto`、`click`、`type`、`press`、`text`、`html`、`evaluate`、`screenshot`、`wait_for`、`select_tab`、`reset` 等动作。
 
 #### 工具执行流程
 
@@ -675,6 +694,7 @@ flash-claw/
 │   │
 │   ├── tools/                        # 工具系统
 │   │   ├── bash.ts                   #   Shell 命令执行
+│   │   ├── browser.ts                #   本地浏览器 CDP 接管
 │   │   ├── read-file.ts              #   文件读取
 │   │   ├── write-file.ts             #   文件写入
 │   │   ├── edit-file.ts              #   文件编辑（查找替换）

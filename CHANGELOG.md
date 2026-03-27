@@ -37,6 +37,22 @@
 
 - 将消息气泡最大宽度调整为容器的 `76%`，让长文本在 PC 端更稳定、不显得过宽。
 
+### feat: 新增本地浏览器 CDP 接管工具
+
+- 新增 `browser` 工具，可通过本地 Chrome 的 CDP 地址执行标签页查看、导航、点击、输入、截图和页面脚本执行。
+- 默认使用 `http://127.0.0.1:9222`，并限制只能连接本机浏览器，避免误连远端调试端口。
+- 新增 `tests/browser-tool.test.ts`，覆盖本地端点连接和安全限制场景。
+
+### tweak: browser 工具支持自动拉起本地 Chrome
+
+- 当本地 `BROWSER_CDP_URL` 不可用时，自动尝试启动受控 Chrome 实例，再回连同一 CDP 地址。
+- 优先复用已存在的本机 Chrome 调试端口，只有在本地端口不可达时才回退到专用实例。
+
+### fix: browser 工具改为 Node helper 执行真实 CDP 操作
+
+- 避免 Bun 运行时下 Playwright `connectOverCDP` 超时的问题，改为 Bun 侧调度、Node helper 实际执行浏览器操作。
+- 真实浏览器联调已覆盖 `goto`、`type`、`click`、`screenshot` 链路，截图产物输出到 `browser-artifacts/`。
+
 ## 2026-03-16 (25)
 
 ### fix: 飞书流式路径缺失任务调度解析 — 定时提醒功能在流式模式下失效
