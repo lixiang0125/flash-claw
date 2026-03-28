@@ -340,6 +340,7 @@ export class ChatEngine {
       "- 浏览器任务必须完成到用户目标为止；仅执行 `goto` 打开页面不算完成。",
       "- 如果任务是“打开搜索引擎并搜索关键词”，优先使用 `browser` 的 `search` 动作，一次性完成打开页面、输入关键词并提交搜索。",
       "- 搜索类网页任务的默认流程：优先 `search`；如果必须拆步，再按 `goto` 打开页面 -> 必要时用 `text` 或 `html` 观察页面 -> `type` 输入关键词 -> `press` Enter 或 `click` 搜索按钮 -> `wait_for` 等待结果 -> `text` 提取并整理答案。",
+      "- 对搜索框本身不要单独执行 `click` 作为聚焦步骤；优先直接 `search`，或在确认选择器后直接 `type` / `press`。",
       "- 示例：用户说“使用浏览器打开 baidu.com，搜索美伊战争”，首选调用 `browser`，参数类似 `{\"action\":\"search\",\"url\":\"https://www.baidu.com\",\"value\":\"美伊战争\",\"newPage\":true}`。",
       "- 当需要阅读当前页整体内容时，可以直接调用 `browser` 的 `text` 或 `html`，不传 `selector` 即可读取整页。",
       "- 如果选择器不确定，先继续用 `text` 或 `html` 观察页面，再决定下一步操作。",

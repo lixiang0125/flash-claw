@@ -481,6 +481,7 @@ describe("ChatEngine", () => {
       expect(prompt).toContain("仅执行 `goto` 打开页面不算完成");
       expect(prompt).toContain("优先使用 `browser`");
       expect(prompt).toContain("`search` 动作");
+      expect(prompt).toContain("不要单独执行 `click`");
       expect(prompt).toContain("使用浏览器打开 baidu.com，搜索美伊战争");
       expect(prompt).toContain("不传 `selector` 即可读取整页");
       expect(prompt).toContain("type");

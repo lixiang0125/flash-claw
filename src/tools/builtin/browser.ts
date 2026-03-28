@@ -441,7 +441,7 @@ async function executeBrowserAction(input: BrowserToolInput, context: ToolExecut
 export const browserTool: FlashClawToolDefinition<typeof BrowserInput, BrowserToolOutput> = {
   name: "browser",
   description:
-    "通过本地 Chrome 的 CDP 接口接管真实浏览器标签页，支持多步完成网页任务：打开页面、读取文本或 HTML、输入关键词、点击按钮、按键提交、等待结果、截图和执行页面脚本。支持 `search` 动作在当前页面或指定 URL 上直接完成站内搜索。用户要求使用浏览器时，应持续调用本工具直到任务完成，而不是只打开页面。",
+    "通过本地 Chrome 的 CDP 接口接管真实浏览器标签页，支持多步完成网页任务：打开页面、读取文本或 HTML、输入关键词、点击按钮、按键提交、等待结果、截图和执行页面脚本。支持 `search` 动作在当前页面或指定 URL 上直接完成站内搜索。搜索场景优先使用 `search`，或直接 `type` / `press`，不要为了聚焦搜索框先单独 `click`。用户要求使用浏览器时，应持续调用本工具直到任务完成，而不是只打开页面。",
   inputSchema: BrowserInput,
   permissionLevel: "execute",
   category: "integration",

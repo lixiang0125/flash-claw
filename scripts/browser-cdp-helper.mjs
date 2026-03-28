@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 function requireField(value, fieldName) {
@@ -120,6 +121,49 @@ async function resolveSearchField(page, explicitSelector, timeoutMs) {
   throw new Error("Could not locate a visible search field on the current page.");
 }
 
+/**
+ * 搜索框类元素更适合直接 focus/fill，避免 Playwright 在 click 可点击性检查上长时间等待。
+ */
+export function shouldUseEditableClickFallback(selector) {
+  const normalizedSelector = selector.trim().toLowerCase();
+
+  return [
+    "#kw",
+    "input",
+    "textarea",
+    "[contenteditable",
+    "[role='searchbox']",
+    '[role="searchbox"]',
+    "[name='wd']",
+    '[name="wd"]',
+    "[name='q']",
+    '[name="q"]',
+    "[type='text']",
+    '[type="text"]',
+    "[type='search']",
+    '[type="search"]',
+  ].some((token) => normalizedSelector.includes(token));
+}
+
+async function clickWithFallback(page, selector, timeoutMs) {
+  const locator = page.locator(selector).first();
+  const preferFallback = shouldUseEditableClickFallback(selector);
+  const clickTimeout = preferFallback ? Math.min(timeoutMs, 2500) : timeoutMs;
+
+  try {
+    await locator.click({ timeout: clickTimeout });
+    return `Clicked ${selector}`;
+  } catch (error) {
+    if (!preferFallback) {
+      throw error;
+    }
+
+    await locator.waitFor({ state: "visible", timeout: Math.min(timeoutMs, 2000) });
+    await locator.focus({ timeout: Math.min(timeoutMs, 2000) });
+    return `Focused ${selector} after click fallback`;
+  }
+}
+
 async function extractPageText(page, timeoutMs) {
   try {
     const text = await page.locator("body").innerText({ timeout: Math.min(timeoutMs, 5000) });
@@ -201,9 +245,9 @@ async function main() {
 
       case "click": {
         const selector = requireField(input.selector, "selector");
-        await page.locator(selector).first().click({ timeout: timeoutMs });
+        const message = await clickWithFallback(page, selector, timeoutMs);
         result = await buildOutput("click", input.endpointUrl, page, pageIndex, context, {
-          message: `Clicked ${selector}`,
+          message,
         });
         break;
       }
@@ -289,7 +333,12 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(error instanceof Error ? error.stack || error.message : String(error));
-  process.exit(1);
-});
+const isDirectExecution = Boolean(process.argv[1])
+  && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectExecution) {
+  main().catch((error) => {
+    process.stderr.write(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  });
+}

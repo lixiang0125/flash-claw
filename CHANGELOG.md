@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-03-28 (28)
+
+### fix: 减少飞书浏览器搜索在百度首页卡住的问题
+
+- `src/chat/engine.ts` 与 `src/tools/builtin/browser.ts` 强化搜索任务约束，明确搜索框不应先单独 `click`，优先直接使用 `search` 或 `type` / `press`。
+- `scripts/browser-cdp-helper.mjs` 为常见搜索框选择器增加 click -> focus 回退，避免 Playwright 在输入框可点击性检查上长时间等待。
+- 新增 `tests/browser-helper.test.ts` 与 `tests/engine.test.ts` 回归断言，覆盖搜索框回退策略和提示词约束。
+
 ## 2026-03-28 (27)
 
 ### fix: 飞书流式路径支持工具调用，并同步暴露 browser 到系统提示词
