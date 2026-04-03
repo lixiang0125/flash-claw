@@ -1,10 +1,11 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { FeishuStreamingCard, type StreamingCardSession } from "./feishu-streaming-card";
 
-export interface FeishuConfig {
+export interface FeishuBotConfig {
   appId?: string;
   appSecret?: string;
   verificationToken?: string;
+  encryptKey?: string;
   webhookUrl?: string;
   useLongConnection?: boolean;
   /** 是否启用流式卡片输出（默认 true） */
@@ -13,14 +14,41 @@ export interface FeishuConfig {
   showElapsed?: boolean;
 }
 
+export interface FeishuBotOptions {
+  connectorId?: string;
+}
+
+export interface FeishuRoutingOptions {
+  connectorId?: string;
+}
+
+/**
+ * 结构化通知目标。
+ * 多机器人场景下，任务和心跳通知必须带上 connectorId 才能路由到正确机器人。
+ */
+export interface FeishuNotificationTarget {
+  platform: "feishu";
+  connectorId: string;
+  chatId: string;
+  tenantKey?: string;
+}
+
+export interface FeishuBotStatus {
+  id: string;
+  connected: boolean;
+  appId?: string;
+  streaming: boolean;
+  mode: "webhook" | "websocket";
+}
+
 /**
  * Minimal interface for the ChatEngine dependency.
  * Injected via setChatEngine() — no hard imports.
  */
 interface ChatEngineAPI {
-  chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+  chat(request: { message: string; sessionId: string; userId?: string }): Promise<{ response: string }>;
   chatStream?(
-    request: { message: string; sessionId: string },
+    request: { message: string; sessionId: string; userId?: string },
     callbacks: {
       onDelta: (delta: string, fullText: string) => void | Promise<void>;
       onDone: (fullText: string) => void | Promise<void>;
@@ -35,13 +63,131 @@ interface ChatEngineAPI {
  */
 interface TaskSchedulerAPI {
   setLastChatId(chatId: string): void;
+  setLastNotificationTarget?(target: FeishuNotificationTarget): void;
+}
+
+type JsonRecord = Record<string, unknown>;
+
+interface FeishuSenderId {
+  user_id?: string;
+  open_id?: string;
+  union_id?: string;
+}
+
+interface FeishuMessagePayload {
+  message_id?: string;
+  message_type?: string;
+  content?: string;
+  chat_id?: string;
+  sender?: {
+    sender_id?: FeishuSenderId;
+  };
+}
+
+interface FeishuEventHeader {
+  event_type?: string;
+  event_id?: string;
+  app_id?: string;
+  tenant_key?: string;
+  token?: string;
+}
+
+interface FeishuEventPayload {
+  schema?: string;
+  header?: FeishuEventHeader;
+  event?: {
+    message?: FeishuMessagePayload;
+    sender?: {
+      sender_id?: FeishuSenderId;
+    };
+    tenant_key?: string;
+    app_id?: string;
+    token?: string;
+  };
+  message?: FeishuMessagePayload;
+  sender?: {
+    sender_id?: FeishuSenderId;
+  };
+  type?: string;
+  challenge?: string;
+  token?: string;
+  app_id?: string;
+  tenant_key?: string;
+}
+
+interface IncomingMessageContext {
+  chatId: string;
+  text: string;
+  sessionId: string;
+  userId: string;
+  senderId?: FeishuSenderId;
+  messageId?: string;
+  tenantKey?: string;
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function readString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return fallback;
+}
+
+function parseFeishuMode(mode: string | undefined): boolean | undefined {
+  if (!mode) return undefined;
+  const normalized = mode.trim().toLowerCase();
+  if (normalized === "websocket") return true;
+  if (normalized === "webhook") return false;
+  return undefined;
+}
+
+function sanitizeSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function readLegacyFeishuBotConfig(env: NodeJS.ProcessEnv = process.env): FeishuBotConfig {
+  const mode = parseFeishuMode(env.FEISHU_MODE);
+
+  return {
+    appId: readString(env.FEISHU_APP_ID),
+    appSecret: readString(env.FEISHU_APP_SECRET),
+    verificationToken: readString(env.FEISHU_VERIFICATION_TOKEN),
+    encryptKey: readString(env.FEISHU_ENCRYPT_KEY),
+    webhookUrl: readString(env.FEISHU_WEBHOOK_URL),
+    useLongConnection:
+      mode ?? readBoolean(env.FEISHU_USE_LONG_CONNECTION, true),
+    enableStreaming: readBoolean(env.FEISHU_STREAMING, true),
+    showElapsed: readBoolean(env.FEISHU_SHOW_ELAPSED, true),
+  };
 }
 
 export class FeishuBot {
-  private config: FeishuConfig;
+  private readonly connectorId: string;
+  private readonly config: FeishuBotConfig;
   private wsClient?: Lark.WSClient;
-  private tenantAccessToken: string = "";
-  private tokenExpireTime: number = 0;
+  private tenantAccessToken = "";
+  private tokenExpireTime = 0;
   private tokenRefreshPromise: Promise<string> | null = null;
 
   /* ── DI fields ── */
@@ -49,62 +195,68 @@ export class FeishuBot {
   private taskSchedulerAPI: TaskSchedulerAPI | null = null;
 
   /* ── 流式卡片管理器 ── */
-  private streamingCard: FeishuStreamingCard;
+  private readonly streamingCard: FeishuStreamingCard;
 
-  constructor() {
+  constructor(config?: FeishuBotConfig, options?: FeishuBotOptions) {
+    this.connectorId = options?.connectorId ?? "default";
+    const baseConfig = config ?? readLegacyFeishuBotConfig();
     this.config = {
-      appId: process.env.FEISHU_APP_ID,
-      appSecret: process.env.FEISHU_APP_SECRET,
-      verificationToken: process.env.FEISHU_VERIFICATION_TOKEN,
-      webhookUrl: process.env.FEISHU_WEBHOOK_URL,
-      useLongConnection: process.env.FEISHU_USE_LONG_CONNECTION !== "false",
-      enableStreaming: process.env.FEISHU_STREAMING !== "false",
-      showElapsed: process.env.FEISHU_SHOW_ELAPSED !== "false",
+      ...baseConfig,
+      useLongConnection: baseConfig.useLongConnection ?? true,
+      enableStreaming: baseConfig.enableStreaming ?? true,
+      showElapsed: baseConfig.showElapsed ?? true,
     };
 
     // 初始化流式卡片管理器，注入 token 获取函数
     this.streamingCard = new FeishuStreamingCard(() => this.getTenantAccessToken());
+  }
 
-    // NOTE: No auto-start here. Call start() after DI wiring is complete.
+  getId(): string {
+    return this.connectorId;
   }
 
   /* ── DI setters ── */
 
   setChatEngine(engine: ChatEngineAPI): void {
     this.chatEngineAPI = engine;
-    console.log("[FeishuBot] ChatEngine attached");
+    console.log(`[FeishuBot:${this.connectorId}] ChatEngine attached`);
   }
 
   setTaskScheduler(scheduler: TaskSchedulerAPI): void {
     this.taskSchedulerAPI = scheduler;
-    console.log("[FeishuBot] TaskScheduler attached");
+    console.log(`[FeishuBot:${this.connectorId}] TaskScheduler attached`);
   }
 
   /**
-   * Explicit startup — must be called AFTER setChatEngine / setTaskScheduler.
-   * Initialises WebSocket or logs webhook mode.
+   * 显式启动机器人。
+   * 多机器人场景下由管理器顺序调用，避免多个 WS 初始化同时篡改全局 console。
    */
-  start(): void {
+  async start(): Promise<void> {
     if (!this.isConfigured()) return;
 
-    if (this.config.useLongConnection && this.config.appId && this.config.appSecret) {
-      this.initWSClient();
-    } else if (this.config.webhookUrl) {
-      console.log("Feishu: using Webhook mode");
+    if (this.shouldUseWebSocket()) {
+      await this.initWSClient();
+      return;
     }
+
+    console.log(`[FeishuBot:${this.connectorId}] using Webhook mode`);
   }
 
   isConfigured(): boolean {
-    return !!(
+    return Boolean(
       this.config.webhookUrl ||
-      (this.config.appId && this.config.appSecret)
+      (this.config.appId && this.config.appSecret),
     );
   }
 
-  getConfig(): FeishuConfig {
+  getConfig(): FeishuBotConfig & { id: string } {
     return {
+      id: this.connectorId,
       ...this.config,
       appSecret: this.config.appSecret ? "***" : undefined,
+      verificationToken: this.config.verificationToken ? "***" : undefined,
+      encryptKey: this.config.encryptKey ? "***" : undefined,
+      webhookUrl: this.config.webhookUrl ? "***" : undefined,
     };
   }
 
@@ -116,23 +268,21 @@ export class FeishuBot {
   /**
    * 初始化飞书 WebSocket 长连接客户端。
    *
-   * 改进说明：
-   * 1. SDK 的 start() 是 fire-and-forget，不会 throw 或返回连接状态
-   * 2. 通过拦截 SDK 内部 console 日志来判断连接是否成功
-   * 3. 外层实现更健壮的重试（5次，指数退避 + 随机抖动，最大60s）
-   * 4. 每次重试创建全新 WSClient 实例，避免内部状态残留
-   * 5. 所有重试耗尽后启动后台静默重连（每2分钟探测一次）
+   * 设计要点：
+   * 1. SDK 的 start() 是 fire-and-forget，必须自行探测 ready 状态
+   * 2. 每次重试创建全新 WSClient，避免内部状态污染
+   * 3. 失败后进入后台静默重连，不阻塞主服务
    */
   private async initWSClient(): Promise<void> {
     if (!this.config.appId || !this.config.appSecret) return;
 
-    console.log("Initializing Feishu WebSocket client...");
+    console.log(`[FeishuBot:${this.connectorId}] Initializing Feishu WebSocket client...`);
 
     const MAX_RETRIES = 5;
     const BASE_DELAY_MS = 3000;
     const MAX_DELAY_MS = 60000;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
       try {
         this.wsClient = new Lark.WSClient({
           appId: this.config.appId,
@@ -143,13 +293,13 @@ export class FeishuBot {
         const connected = await this.startWithTimeout();
 
         if (connected) {
-          console.log("Feishu WebSocket client started successfully");
+          console.log(`[FeishuBot:${this.connectorId}] WebSocket client started successfully`);
           return;
         }
 
         throw new Error("WebSocket connection not established within timeout");
-      } catch (err: any) {
-        const errMsg = err?.message || String(err);
+      } catch (error: unknown) {
+        const errMsg = toErrorMessage(error);
 
         if (attempt < MAX_RETRIES) {
           const delay = Math.min(
@@ -157,14 +307,14 @@ export class FeishuBot {
             MAX_DELAY_MS,
           );
           console.warn(
-            `[FeishuBot] Connection attempt ${attempt}/${MAX_RETRIES} failed: ${errMsg}. ` +
+            `[FeishuBot:${this.connectorId}] Connection attempt ${attempt}/${MAX_RETRIES} failed: ${errMsg}. ` +
               `Retrying in ${(delay / 1000).toFixed(1)}s...`,
           );
-          await new Promise((r) => setTimeout(r, delay));
+          await new Promise((resolve) => setTimeout(resolve, delay));
         } else {
           console.error(
-            `[FeishuBot] Failed after ${MAX_RETRIES} attempts. Last error: ${errMsg}. ` +
-              "The bot will operate without real-time event subscription.",
+            `[FeishuBot:${this.connectorId}] Failed after ${MAX_RETRIES} attempts. ` +
+              `Last error: ${errMsg}. The bot will operate without real-time event subscription.`,
           );
           this.scheduleBackgroundReconnect();
         }
@@ -174,8 +324,7 @@ export class FeishuBot {
 
   /**
    * 带超时检测的 WSClient 启动。
-   * SDK 的 start() 方法内部会打印 "ws client ready"，
-   * 通过拦截 console.info 来检测连接是否完成。
+   * SDK 会打印 "ws client ready"，这里通过拦截 console.info 判断连接成功。
    */
   private startWithTimeout(): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
@@ -190,16 +339,16 @@ export class FeishuBot {
         }
       }, TIMEOUT_MS);
 
-      const origInfo = console.info;
+      const originalInfo = console.info;
 
       const cleanup = () => {
-        console.info = origInfo;
+        console.info = originalInfo;
         clearTimeout(timer);
       };
 
-      console.info = (...args: any[]) => {
-        origInfo.apply(console, args);
-        const msg = args.map(String).join(" ");
+      console.info = (...args: unknown[]) => {
+        originalInfo.apply(console, args);
+        const msg = args.map((arg) => String(arg)).join(" ");
         if (msg.includes("ws client ready") && !settled) {
           settled = true;
           cleanup();
@@ -207,12 +356,14 @@ export class FeishuBot {
         }
       };
 
-      (this.wsClient as any).start({
+      const wsClient = this.wsClient as unknown as {
+        start(config: { eventDispatcher: Lark.EventDispatcher }): void;
+      };
+
+      wsClient.start({
         eventDispatcher: new Lark.EventDispatcher({}).register({
-          "im.message.receive_v1": async (data: any) => {
-            console.log("Feishu: Received message event!");
-            console.log("Data:", JSON.stringify(data, null, 2));
-            await this.handleMessage(data);
+          "im.message.receive_v1": async (data: unknown) => {
+            await this.handleRealtimeEvent(data);
           },
         }),
       });
@@ -220,18 +371,17 @@ export class FeishuBot {
   }
 
   /**
-   * 后台静默重连：初始重试耗尽后，每2分钟探测飞书 endpoint
-   * 可用性并尝试重新建立连接。
+   * 后台静默重连：初始重试耗尽后，每 2 分钟探测一次飞书 endpoint。
    */
   private scheduleBackgroundReconnect(): void {
     const INTERVAL_MS = 120_000;
-    console.log("[FeishuBot] Scheduling background reconnect every 2 minutes...");
+    console.log(`[FeishuBot:${this.connectorId}] Scheduling background reconnect every 2 minutes...`);
 
     const intervalId = setInterval(async () => {
       try {
         if (!this.config.appId || !this.config.appSecret) return;
 
-        const resp = await fetch("https://open.feishu.cn/callback/ws/endpoint", {
+        const response = await fetch("https://open.feishu.cn/callback/ws/endpoint", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -239,14 +389,14 @@ export class FeishuBot {
             AppSecret: this.config.appSecret,
           }),
         });
-        const data = await resp.json() as any;
+        const data = await response.json() as { code?: number };
 
         if (data.code !== 0) {
-          console.log(`[FeishuBot] Background probe: code ${data.code}, skipping`);
+          console.log(`[FeishuBot:${this.connectorId}] Background probe: code ${String(data.code)}, skipping`);
           return;
         }
 
-        console.log("[FeishuBot] Server available, attempting reconnect...");
+        console.log(`[FeishuBot:${this.connectorId}] Server available, attempting reconnect...`);
         this.wsClient = new Lark.WSClient({
           appId: this.config.appId,
           appSecret: this.config.appSecret,
@@ -255,117 +405,79 @@ export class FeishuBot {
 
         const connected = await this.startWithTimeout();
         if (connected) {
-          console.log("[FeishuBot] Background reconnect successful!");
+          console.log(`[FeishuBot:${this.connectorId}] Background reconnect successful!`);
           clearInterval(intervalId);
         }
-      } catch (err: any) {
-        console.log(`[FeishuBot] Background reconnect failed: ${err?.message || err}`);
+      } catch (error: unknown) {
+        console.log(`[FeishuBot:${this.connectorId}] Background reconnect failed: ${toErrorMessage(error)}`);
       }
     }, INTERVAL_MS);
   }
 
+  private async handleRealtimeEvent(data: unknown): Promise<void> {
+    const event = this.asEventPayload(data);
+    const context = this.parseIncomingMessage(event, true);
 
-  /**
-   * 处理收到的飞书消息。
-   *
-   * 核心改进：支持流式卡片输出
-   * 1. 创建 CardKit 流式卡片并发送
-   * 2. 调用 ChatEngine.chatStream() 流式获取 LLM 输出
-   * 3. 实时将文本 delta 推送到卡片
-   * 4. 完成后关闭流式模式，显示耗时 footer
-   * 5. 如果流式不可用，降级为非流式模式
-   */
-  private async handleMessage(event: any): Promise<void> {
-    console.log("Feishu: Received event:", JSON.stringify(event));
-
-    const message = event.message;
-    if (!message || !message.message_id) {
-      console.log("Feishu: No message or message_id in event");
+    if (!context) {
       return;
     }
 
-    const messageType = message.message_type;
-    console.log("Feishu: Message type:", messageType);
+    this.scheduleMessagePipeline(context);
+  }
 
-    if (messageType !== "text" && messageType !== "post") {
-      console.log("Feishu: Ignoring non-text message type");
-      return;
-    }
-
-    let text = "";
-    try {
-      const content = JSON.parse(message.content || "{}");
-      text = content.text || "";
-    } catch {
-      text = message.content || "";
-    }
-
-    console.log("Feishu: Message text:", text);
-
-    if (!text) {
-      console.log("Feishu: Empty text, ignoring");
-      return;
-    }
-
-    const senderId = event.sender?.sender_id || message.sender?.sender_id;
-    const chatId = message.chat_id;
-    const sessionId = this.getSessionId(chatId, senderId);
-    const messageId = message.message_id;
-
-    // Record chat ID for task notifications (via DI)
-    this.taskSchedulerAPI?.setLastChatId(chatId);
-
-    console.log(
-      `Feishu: Processing message from ${senderId?.user_id || senderId?.open_id}: ${text}`
-    );
-
-    // Add emoji reaction (no LLM required)
-    await this.addReaction(messageId, "THUMBSUP");
-
-    // Background processing
-    console.log("Feishu: Setting up background task");
-    setTimeout(async () => {
-      console.log("Feishu: Background task started");
-      try {
-        if (!this.chatEngineAPI) {
-          console.error("Feishu: ChatEngine 未注入，无法处理消息");
-          return;
-        }
-
-        // 判断是否使用流式卡片
-        const useStreaming =
-          this.config.enableStreaming &&
-          typeof this.chatEngineAPI.chatStream === "function";
-
-        if (useStreaming) {
-          await this.handleMessageStreaming(chatId, text, sessionId);
-        } else {
-          await this.handleMessageNonStreaming(chatId, senderId, text, sessionId);
-        }
-      } catch (error) {
-        console.error("Feishu: Chat error:", error);
-        const errorResponse = await this.generateErrorResponse(text, error);
-        await this.sendMessage(chatId, senderId, errorResponse);
-      }
+  private scheduleMessagePipeline(context: IncomingMessageContext): void {
+    setTimeout(() => {
+      void this.runMessagePipeline(context).catch(async (error: unknown) => {
+        console.error(`[FeishuBot:${this.connectorId}] Chat error:`, error);
+        const errorResponse = await this.generateErrorResponse(context.text, error);
+        await this.sendMessage(context.chatId, context.senderId, errorResponse);
+      });
     }, 100);
   }
 
   /**
-   * 流式模式处理消息：
-   * 1. 创建流式卡片 → 2. 流式推送 LLM 输出 → 3. finalize 显示耗时
+   * 统一消息处理入口。
+   * WebSocket 与 HTTP webhook 都在这里汇合，避免两条逻辑链逐渐分叉。
    */
-  private async handleMessageStreaming(
-    chatId: string,
-    text: string,
-    sessionId: string,
-  ): Promise<void> {
+  private async runMessagePipeline(context: IncomingMessageContext): Promise<void> {
+    console.log(
+      `[FeishuBot:${this.connectorId}] Processing message from ${this.getRawSenderId(context.senderId)}: ${context.text}`,
+    );
+
+    this.taskSchedulerAPI?.setLastChatId(context.chatId);
+    this.taskSchedulerAPI?.setLastNotificationTarget?.(this.buildNotificationTarget(context));
+
+    if (context.messageId) {
+      await this.addReaction(context.messageId, "THUMBSUP");
+    }
+
+    if (!this.chatEngineAPI) {
+      throw new Error("ChatEngine not available");
+    }
+
+    const useStreaming = this.canUseStreaming();
+
+    if (useStreaming) {
+      await this.handleMessageStreaming(context);
+      return;
+    }
+
+    await this.handleMessageNonStreaming(context);
+  }
+
+  /**
+   * 流式模式处理消息：
+   * 1. 创建流式卡片
+   * 2. 流式调用 ChatEngine.chatStream()
+   * 3. Finalize 关闭流式展示
+   */
+  private async handleMessageStreaming(context: IncomingMessageContext): Promise<void> {
     let cardSession: StreamingCardSession | null = null;
     const t0 = Date.now();
 
     try {
-      // Step 1: 创建流式卡片
       const tCard = Date.now();
-      cardSession = await this.streamingCard.create(chatId, {
+      cardSession = await this.streamingCard.create(context.chatId, {
         title: "🤖 FlashClaw",
         headerTemplate: "blue",
         finishTitle: "🤖 FlashClaw",
@@ -373,12 +485,13 @@ export class FeishuBot {
         showElapsed: this.config.showElapsed,
         subtitle: "正在思考...",
       });
-      console.log(`[FeishuBot] ⏱ card create=${Date.now() - tCard}ms, mode=${cardSession.mode}`);
+      console.log(
+        `[FeishuBot:${this.connectorId}] ⏱ card create=${Date.now() - tCard}ms, mode=${cardSession.mode}`,
+      );
 
-      // Step 2: 流式调用 ChatEngine
       const tStream = Date.now();
       const result = await this.chatEngineAPI!.chatStream!(
-        { message: text, sessionId },
+        { message: context.text, sessionId: context.sessionId, userId: context.userId },
         {
           onDelta: async (_delta: string, fullText: string) => {
             if (cardSession) {
@@ -386,54 +499,51 @@ export class FeishuBot {
             }
           },
           onDone: async (fullText: string) => {
-            console.log(`[FeishuBot] ⏱ stream done=${Date.now() - tStream}ms, chars=${fullText.length}`);
+            console.log(
+              `[FeishuBot:${this.connectorId}] ⏱ stream done=${Date.now() - tStream}ms, chars=${fullText.length}`,
+            );
           },
           onError: async (error: Error) => {
-            console.error("[FeishuBot] Stream error:", error.message);
+            console.error(`[FeishuBot:${this.connectorId}] Stream error:`, error.message);
           },
         },
       );
 
-      // Step 3: Finalize
       const tFinal = Date.now();
       if (cardSession) {
         await this.streamingCard.finalize(cardSession, result.response);
       }
-      console.log(`[FeishuBot] ⏱ finalize=${Date.now() - tFinal}ms`);
-      console.log(`[FeishuBot] ⏱ E2E TOTAL=${Date.now() - t0}ms | card=${Date.now() - tCard - (Date.now() - tStream)}ms`);
-    } catch (error: any) {
-      console.error("[FeishuBot] Streaming failed:", error.message);
+      console.log(`[FeishuBot:${this.connectorId}] ⏱ finalize=${Date.now() - tFinal}ms`);
+      console.log(`[FeishuBot:${this.connectorId}] ⏱ E2E TOTAL=${Date.now() - t0}ms`);
+    } catch (error: unknown) {
+      const errMsg = toErrorMessage(error);
+      console.error(`[FeishuBot:${this.connectorId}] Streaming failed:`, errMsg);
       if (cardSession && !cardSession.closed) {
         try {
           await this.streamingCard.finalize(
             cardSession,
-            `⚠️ 处理遇到问题，请稍后重试。\n\n错误：${error.message}`,
+            `⚠️ 处理遇到问题，请稍后重试。\n\n错误：${errMsg}`,
           );
+          return;
         } catch {
-          await this.sendViaAPI(chatId, "抱歉，处理消息时遇到问题，请稍后重试。");
+          // Fall through to API send fallback below.
         }
-      } else {
-        await this.sendViaAPI(chatId, "抱歉，处理消息时遇到问题，请稍后重试。");
       }
+      await this.sendViaAPI(context.chatId, "抱歉，处理消息时遇到问题，请稍后重试。");
     }
   }
-
 
   /**
    * 非流式模式处理消息（降级方案）。
    */
-  private async handleMessageNonStreaming(
-    chatId: string,
-    senderId: any,
-    text: string,
-    sessionId: string,
-  ): Promise<void> {
-    console.log("[FeishuBot] Using non-streaming mode");
+  private async handleMessageNonStreaming(context: IncomingMessageContext): Promise<void> {
+    console.log(`[FeishuBot:${this.connectorId}] Using non-streaming mode`);
     const startTime = Date.now();
 
     const result = await this.chatEngineAPI!.chat({
-      message: text,
-      sessionId,
+      message: context.text,
+      sessionId: context.sessionId,
+      userId: context.userId,
     });
 
     const elapsed = Date.now() - startTime;
@@ -441,25 +551,24 @@ export class FeishuBot {
       ? `${elapsed}ms`
       : `${(elapsed / 1000).toFixed(1)}s`;
 
-    // 非流式模式：添加耗时到回复末尾
     let reply = result.response;
     if (this.config.showElapsed) {
       reply += `\n\n---\n⏱ 耗时 ${elapsedStr}`;
     }
 
-    console.log("Feishu: Chat done, response length:", result.response.length);
-    await this.sendMessage(chatId, senderId, reply);
-    console.log("Feishu: sendMessage completed");
+    console.log(`[FeishuBot:${this.connectorId}] Chat done, response length:`, result.response.length);
+    await this.sendMessage(context.chatId, context.senderId, reply);
   }
 
-  private async generateErrorResponse(userMessage: string, error: any): Promise<string> {
+  private async generateErrorResponse(userMessage: string, error: unknown): Promise<string> {
     if (!this.chatEngineAPI) {
       return "抱歉，我遇到了一些问题。请稍后重试，或者换一种方式提问。";
     }
     try {
       const result = await this.chatEngineAPI.chat({
-        message: `用户说: "${userMessage}"\n\n处理用户请求时发生错误: ${error.message || error}\n\n请生成一个友好的回复，告知用户遇到了问题，但不要提到技术细节。可以建议用户稍后重试或换一种方式提问。`,
-        sessionId: "feishu_error_response",
+        message: `用户说: "${userMessage}"\n\n处理用户请求时发生错误: ${toErrorMessage(error)}\n\n请生成一个友好的回复，告知用户遇到了问题，但不要提到技术细节。可以建议用户稍后重试或换一种方式提问。`,
+        sessionId: `feishu_error_response:${sanitizeSegment(this.connectorId)}`,
+        userId: `feishu:${sanitizeSegment(this.connectorId)}:system:error`,
       });
       return result.response;
     } catch {
@@ -467,10 +576,196 @@ export class FeishuBot {
     }
   }
 
-  private getSessionId(chatId: string, userId?: any): string {
-    const userIdStr =
-      userId?.user_id || userId?.open_id || userId?.union_id || "unknown";
-    return `feishu_${chatId}_${userIdStr}`;
+  private buildNotificationTarget(context: IncomingMessageContext): FeishuNotificationTarget {
+    return {
+      platform: "feishu",
+      connectorId: this.connectorId,
+      chatId: context.chatId,
+      tenantKey: context.tenantKey,
+    };
+  }
+
+  private buildScopedUserId(senderId: FeishuSenderId | undefined, tenantKey?: string): string {
+    const rawUserId = this.getRawSenderId(senderId);
+    const tenantSegment = sanitizeSegment(tenantKey ?? "default");
+    const connectorSegment = sanitizeSegment(this.connectorId);
+    return `feishu:${connectorSegment}:${tenantSegment}:${sanitizeSegment(rawUserId)}`;
+  }
+
+  private buildSessionId(chatId: string, senderId: FeishuSenderId | undefined, tenantKey?: string): string {
+    const connectorSegment = sanitizeSegment(this.connectorId);
+    const tenantSegment = sanitizeSegment(tenantKey ?? "default");
+    const chatSegment = sanitizeSegment(chatId);
+    const userSegment = sanitizeSegment(this.getRawSenderId(senderId));
+    return `feishu:${connectorSegment}:${tenantSegment}:${chatSegment}:${userSegment}`;
+  }
+
+  private getRawSenderId(senderId?: FeishuSenderId): string {
+    return senderId?.user_id || senderId?.open_id || senderId?.union_id || "unknown";
+  }
+
+  private extractMessageText(message: FeishuMessagePayload): string {
+    if (!message.content) return "";
+    try {
+      const parsed = JSON.parse(message.content) as { text?: string };
+      return readString(parsed.text) ?? "";
+    } catch {
+      return message.content;
+    }
+  }
+
+  private extractSenderId(event: FeishuEventPayload, message: FeishuMessagePayload): FeishuSenderId | undefined {
+    return event.event?.sender?.sender_id
+      || event.sender?.sender_id
+      || message.sender?.sender_id;
+  }
+
+  private extractTenantKey(event: FeishuEventPayload): string | undefined {
+    return event.header?.tenant_key
+      || event.event?.tenant_key
+      || event.tenant_key;
+  }
+
+  private extractProvidedToken(event: FeishuEventPayload): string | undefined {
+    return event.header?.token
+      || event.event?.token
+      || event.token;
+  }
+
+  private asEventPayload(body: unknown): FeishuEventPayload {
+    if (!isRecord(body)) {
+      return {};
+    }
+
+    const header = isRecord(body.header)
+      ? {
+          event_type: readString(body.header.event_type),
+          event_id: readString(body.header.event_id),
+          app_id: readString(body.header.app_id),
+          tenant_key: readString(body.header.tenant_key),
+          token: readString(body.header.token),
+        }
+      : undefined;
+
+    const eventPayload = isRecord(body.event)
+      ? {
+          message: this.asMessagePayload(body.event.message),
+          sender: isRecord(body.event.sender)
+            ? { sender_id: this.asSenderId(body.event.sender.sender_id) }
+            : undefined,
+          tenant_key: readString(body.event.tenant_key),
+          app_id: readString(body.event.app_id),
+          token: readString(body.event.token),
+        }
+      : undefined;
+
+    return {
+      schema: readString(body.schema),
+      header,
+      event: eventPayload,
+      message: this.asMessagePayload(body.message),
+      sender: isRecord(body.sender)
+        ? { sender_id: this.asSenderId(body.sender.sender_id) }
+        : undefined,
+      type: readString(body.type),
+      challenge: readString(body.challenge),
+      token: readString(body.token),
+      app_id: readString(body.app_id),
+      tenant_key: readString(body.tenant_key),
+    };
+  }
+
+  private asMessagePayload(value: unknown): FeishuMessagePayload | undefined {
+    if (!isRecord(value)) {
+      return undefined;
+    }
+
+    return {
+      message_id: readString(value.message_id),
+      message_type: readString(value.message_type),
+      content: readString(value.content),
+      chat_id: readString(value.chat_id),
+      sender: isRecord(value.sender)
+        ? { sender_id: this.asSenderId(value.sender.sender_id) }
+        : undefined,
+    };
+  }
+
+  private asSenderId(value: unknown): FeishuSenderId | undefined {
+    if (!isRecord(value)) {
+      return undefined;
+    }
+
+    return {
+      user_id: readString(value.user_id),
+      open_id: readString(value.open_id),
+      union_id: readString(value.union_id),
+    };
+  }
+
+  private parseIncomingMessage(event: FeishuEventPayload, requireMessageId: boolean): IncomingMessageContext | null {
+    const message = event.event?.message || event.message;
+    if (!message?.chat_id) {
+      return null;
+    }
+
+    if (requireMessageId && !message.message_id) {
+      return null;
+    }
+
+    const messageType = message.message_type;
+    if (messageType && messageType !== "text" && messageType !== "post") {
+      return null;
+    }
+
+    const text = this.extractMessageText(message);
+    if (!text) {
+      return null;
+    }
+
+    const senderId = this.extractSenderId(event, message);
+    const tenantKey = this.extractTenantKey(event);
+    const sessionId = this.buildSessionId(message.chat_id, senderId, tenantKey);
+    const userId = this.buildScopedUserId(senderId, tenantKey);
+
+    return {
+      chatId: message.chat_id,
+      text,
+      sessionId,
+      userId,
+      senderId,
+      messageId: message.message_id,
+      tenantKey,
+    };
+  }
+
+  private isUrlVerification(event: FeishuEventPayload): boolean {
+    return event.header?.event_type === "url_verification";
+  }
+
+  private isMessageEvent(event: FeishuEventPayload): boolean {
+    return event.type === "message" || Boolean(event.event?.message || event.message);
+  }
+
+  private canUseStreaming(): boolean {
+    return Boolean(
+      this.config.enableStreaming &&
+      this.config.appId &&
+      this.config.appSecret &&
+      typeof this.chatEngineAPI?.chatStream === "function",
+    );
+  }
+
+  private shouldUseWebSocket(): boolean {
+    return Boolean(
+      this.config.useLongConnection &&
+      this.config.appId &&
+      this.config.appSecret,
+    );
+  }
+
+  private getChallenge(event: FeishuEventPayload): string | undefined {
+    return event.challenge || event.header?.event_id;
   }
 
   private async getTenantAccessToken(): Promise<string> {
@@ -506,13 +801,18 @@ export class FeishuBot {
           app_id: this.config.appId,
           app_secret: this.config.appSecret,
         }),
-      }
+      },
     );
 
-    const data = await response.json();
+    const data = await response.json() as {
+      code?: number;
+      msg?: string;
+      tenant_access_token?: string;
+      expire?: number;
+    };
 
-    if (data.code !== 0) {
-      throw new Error(`Failed to get token: ${data.msg}`);
+    if (data.code !== 0 || !data.tenant_access_token || !data.expire) {
+      throw new Error(`Failed to get token: ${data.msg || "unknown error"}`);
     }
 
     this.tenantAccessToken = data.tenant_access_token;
@@ -522,22 +822,24 @@ export class FeishuBot {
 
   async sendMessage(
     chatId: string,
-    userId?: any,
-    text?: string
+    _userId?: unknown,
+    text?: string,
   ): Promise<void> {
     if (!text) return;
 
-    console.log("Feishu: sendMessage called, chatId:", chatId, "text length:", text?.length);
+    console.log(`[FeishuBot:${this.connectorId}] sendMessage called, chatId:`, chatId, "text length:", text.length);
 
     if (this.config.webhookUrl) {
-      console.log("Feishu: Using webhook mode");
       await this.sendViaWebhook(text);
-    } else if (this.config.appId && this.config.appSecret) {
-      console.log("Feishu: Using API mode");
-      await this.sendViaAPI(chatId, text);
-    } else {
-      console.log("Feishu: Not configured for sending");
+      return;
     }
+
+    if (this.config.appId && this.config.appSecret) {
+      await this.sendViaAPI(chatId, text);
+      return;
+    }
+
+    console.log(`[FeishuBot:${this.connectorId}] Not configured for sending`);
   }
 
   async notify(chatId: string, text: string): Promise<void> {
@@ -563,18 +865,18 @@ export class FeishuBot {
         }),
       });
 
-      const text = await response.text();
-      console.log(`Feishu: Reaction response: ${text}`);
+      const payload = await response.text();
+      console.log(`[FeishuBot:${this.connectorId}] Reaction response: ${payload}`);
 
-      const data = JSON.parse(text);
+      const data = JSON.parse(payload) as { code?: number; msg?: string };
 
       if (data.code !== 0) {
-        throw new Error(`添加表情失败: ${data.msg}`);
+        throw new Error(`添加表情失败: ${data.msg || "unknown error"}`);
       }
 
-      console.log(`Feishu: Added ${emojiType} reaction to message ${messageId}`);
-    } catch (error: any) {
-      console.error(`Feishu: Failed to add reaction:`, error.message || error);
+      console.log(`[FeishuBot:${this.connectorId}] Added ${emojiType} reaction to message ${messageId}`);
+    } catch (error: unknown) {
+      console.error(`[FeishuBot:${this.connectorId}] Failed to add reaction:`, toErrorMessage(error));
     }
   }
 
@@ -592,118 +894,93 @@ export class FeishuBot {
   }
 
   private async sendViaAPI(chatId: string, text: string): Promise<void> {
-    console.log("Feishu: sendViaAPI called, chatId:", chatId);
     if (!this.config.appId || !this.config.appSecret) {
-      console.log("Feishu: No appId or appSecret");
       return;
     }
 
     try {
-      console.log("Feishu: Getting token...");
       const token = await this.getTenantAccessToken();
-      console.log("Feishu: Token:", token?.substring(0, 20) + "...");
 
-      console.log("Feishu: Creating client...");
       const client = new Lark.Client({
         appId: this.config.appId,
         appSecret: this.config.appSecret,
         domain: Lark.Domain.Lark,
         disableTokenCache: true,
       });
-      console.log("Feishu: Client created");
 
-      console.log("Feishu: Calling message.create...");
       const result = await client.im.v1.message.create({
         params: {
-          receive_id_type: 'chat_id',
+          receive_id_type: "chat_id",
         },
         data: {
           receive_id: chatId,
-          msg_type: 'text',
+          msg_type: "text",
           content: JSON.stringify({ text }),
         },
       }, Lark.withTenantToken(token));
-      console.log("Feishu: Send result:", JSON.stringify(result));
 
       if (result.code !== 0) {
-        console.error("Feishu: Send message failed:", result.msg);
+        console.error(`[FeishuBot:${this.connectorId}] Send message failed:`, result.msg);
       } else {
-        console.log(`Feishu: Sent message to ${chatId}`);
+        console.log(`[FeishuBot:${this.connectorId}] Sent message to ${chatId}`);
       }
-    } catch (error: any) {
-      console.error("Feishu: Failed to send message:", error.message || error);
-      if (error.response) {
-        console.error("Feishu: Response data:", error.response.data);
-      }
+    } catch (error: unknown) {
+      console.error(`[FeishuBot:${this.connectorId}] Failed to send message:`, toErrorMessage(error));
     }
   }
 
-  async handleEvent(body: any): Promise<any> {
-    const event = body as any;
+  async handleEvent(body: unknown): Promise<unknown> {
+    const event = this.asEventPayload(body);
+    const providedToken = this.extractProvidedToken(event);
 
-    if (event.schema === "2.0" && event.header?.event_type === "url_verification") {
+    if (providedToken && !this.verifyToken(providedToken)) {
+      return { success: false, error: "Verification token mismatch" };
+    }
+
+    if (this.isUrlVerification(event)) {
       return {
-        challenge: event.header?.event_id || body.challenge,
+        challenge: this.getChallenge(event),
       };
     }
 
-    if (event.header?.event_type === "url_verification") {
-      return {
-        challenge: body.challenge,
-      };
+    if (!this.isMessageEvent(event)) {
+      return { success: true };
     }
 
-    if (event.type === "message" || event.event?.message) {
-      const message = event.event?.message || event.message;
-      if (!message) return { success: true };
-
-      let text = "";
-      try {
-        const content = JSON.parse(message.content || "{}");
-        text = content.text || "";
-      } catch {
-        text = message.content || "";
-      }
-
-      if (!text) return { success: true };
-
-      const chatId = message.chat_id;
-      const senderId = event.sender?.sender_id || message.sender?.sender_id;
-      const sessionId = this.getSessionId(chatId, senderId);
-
-      console.log(
-        `Feishu (Webhook): Received message from ${senderId?.user_id || senderId?.open_id}: ${text}`
-      );
-
-      if (!this.chatEngineAPI) {
-        console.error("Feishu: ChatEngine 未注入，无法处理 Webhook 消息");
-        return { success: false, error: "ChatEngine not available" };
-      }
-
-      try {
-        const result = await this.chatEngineAPI.chat({
-          message: text,
-          sessionId,
-        });
-
-        await this.sendMessage(chatId, senderId, result.response);
-      } catch (error) {
-        console.error("Feishu: Chat error:", error);
-        await this.sendMessage(chatId, senderId, "处理消息失败，请稍后重试");
-      }
+    if (!this.chatEngineAPI) {
+      console.error(`[FeishuBot:${this.connectorId}] ChatEngine 未注入，无法处理 Webhook 消息`);
+      return { success: false, error: "ChatEngine not available" };
     }
 
-    return { success: true };
+    const context = this.parseIncomingMessage(event, false);
+    if (!context) {
+      return { success: true };
+    }
+
+    try {
+      await this.runMessagePipeline(context);
+      return { success: true };
+    } catch (error: unknown) {
+      console.error(`[FeishuBot:${this.connectorId}] Chat error:`, error);
+      await this.sendMessage(context.chatId, context.senderId, "处理消息失败，请稍后重试");
+      return { success: false, error: toErrorMessage(error) };
+    }
   }
 
   /**
-   * 获取飞书连接状态
+   * 获取飞书连接状态。
+   * webhook 模式没有长连接，因此只要配置完整就视为 connected。
    */
-  getStatus(): { connected: boolean; appId?: string; streaming: boolean } {
+  getStatus(): FeishuBotStatus {
+    const mode = this.shouldUseWebSocket() ? "websocket" : "webhook";
+    const connected = mode === "websocket" ? Boolean(this.wsClient) : this.isConfigured();
+
     return {
-      connected: !!this.wsClient,
+      id: this.connectorId,
+      connected,
       appId: this.config.appId,
-      streaming: !!this.config.enableStreaming,
+      streaming: Boolean(this.config.enableStreaming),
+      mode,
     };
   }
 }

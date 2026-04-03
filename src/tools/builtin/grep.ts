@@ -7,12 +7,12 @@
  * 快速定位特定代码片段或文本模式。
  */
 import { z, ZodType } from "zod";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import type { FlashClawToolDefinition, ToolExecutionContext } from "../types.js";
 
-/** 将 exec 函数包装为 Promise 版本，用于异步执行 ripgrep 命令 */
-const execAsync = promisify(exec);
+/** 将 execFile 包装为 Promise 版本，避免 shell 转义破坏正则与空格查询。 */
+const execFileAsync = promisify(execFile);
 
 /**
  * Grep 工具的输入参数 Schema。
@@ -122,7 +122,7 @@ export const grepTool: FlashClawToolDefinition<typeof GrepInput, GrepOutput> = {
     args.push(searchDir);
 
     try {
-      const { stdout } = await execAsync(args.join(" "), { timeout: 15000 });
+      const { stdout } = await execFileAsync("rg", args.slice(1), { timeout: 15000 });
       const matches: GrepMatch[] = [];
       let matchCount = 0;
 

@@ -10,9 +10,9 @@ interface AppServices {
     clearSession(sessionId: string): void | Promise<void>;
   };
   feishuBot: {
-    handleEvent(body: unknown): Promise<unknown>;
-    isConfigured(): boolean;
-    getConfig(): unknown;
+    handleEvent(body: unknown, options?: { connectorId?: string }): Promise<unknown>;
+    isConfigured(connectorId?: string): boolean;
+    getConfig(connectorId?: string): unknown;
   };
   taskScheduler: {
     listTasks(): unknown[];
@@ -40,6 +40,29 @@ interface AppServices {
 export function createHonoApp(services: AppServices): Hono {
   const { chatEngine, feishuBot, taskScheduler, heartbeatSystem, subAgentSystem, logger } = services;
   const app = new Hono();
+
+  const handleFeishuWebhook = async (body: unknown, connectorId?: string): Promise<Response> => {
+    if (!feishuBot.isConfigured(connectorId)) {
+      return new Response(JSON.stringify({ error: "Feishu bot not configured" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    try {
+      const result = await feishuBot.handleEvent(body, { connectorId });
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      logger.error("Feishu webhook error", { error, connectorId });
+      return new Response(JSON.stringify({ error: "Webhook processing failed" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  };
 
   app.use("/*", serveStatic({ root: "./dist" }));
 
@@ -125,26 +148,63 @@ export function createHonoApp(services: AppServices): Hono {
     return c.json(result);
   });
 
-  app.post("/api/webhooks/feishu", async (c) => {
-    if (!feishuBot.isConfigured()) {
-      return c.json({ error: "Feishu bot not configured" }, 400);
-    }
-
-    try {
-      const body = await c.req.json();
-      const result = await feishuBot.handleEvent(body);
-      return c.json(result);
-    } catch (error) {
-      logger.error("Feishu webhook error", { error });
-      return c.json({ error: "Webhook processing failed" }, 500);
-    }
-  });
-
   app.get("/api/webhooks/feishu/status", (c) => {
     return c.json({
       configured: feishuBot.isConfigured(),
       config: feishuBot.getConfig(),
     });
+  });
+
+  app.get("/api/webhooks/feishu/:botId/status", (c) => {
+    const botId = c.req.param("botId");
+    if (!feishuBot.isConfigured(botId)) {
+      return c.json({ error: "Feishu bot not configured" }, 404);
+    }
+
+    return c.json({
+      configured: true,
+      config: feishuBot.getConfig(botId),
+    });
+  });
+
+  app.post("/api/webhooks/feishu/:botId", async (c) => {
+    const body = await c.req.json();
+    return handleFeishuWebhook(body, c.req.param("botId"));
+  });
+
+  app.post("/api/webhooks/feishu", async (c) => {
+    const body = await c.req.json();
+    return handleFeishuWebhook(body);
+  });
+
+  // 兼容 README 与历史外部回调地址
+  app.get("/api/feishu/webhook/status", (c) => {
+    return c.json({
+      configured: feishuBot.isConfigured(),
+      config: feishuBot.getConfig(),
+    });
+  });
+
+  app.get("/api/feishu/webhook/:botId/status", (c) => {
+    const botId = c.req.param("botId");
+    if (!feishuBot.isConfigured(botId)) {
+      return c.json({ error: "Feishu bot not configured" }, 404);
+    }
+
+    return c.json({
+      configured: true,
+      config: feishuBot.getConfig(botId),
+    });
+  });
+
+  app.post("/api/feishu/webhook/:botId", async (c) => {
+    const body = await c.req.json();
+    return handleFeishuWebhook(body, c.req.param("botId"));
+  });
+
+  app.post("/api/feishu/webhook", async (c) => {
+    const body = await c.req.json();
+    return handleFeishuWebhook(body);
   });
 
   app.get("/api/tasks", (c) => {

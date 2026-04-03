@@ -80,7 +80,11 @@ function wireAll(replyText: string = "模拟回复") {
   chatEngine.setToolExecutor(async () => ({ result: null }));
   (chatEngine as any).client = mockClient;
 
-  const fb = new FeishuBot();
+  const fb = new FeishuBot({
+    enableStreaming: false,
+    showElapsed: false,
+    useLongConnection: false,
+  });
   fb.setChatEngine(chatEngine as any);
 
   // 关键: mock sendMessage 消除真实 HTTP 请求（飞书 API 400 错误）
@@ -187,7 +191,11 @@ describe("集成测试 — DI 链路验证", () => {
     });
 
     it("未注入 ChatEngine 的 FeishuBot 返回错误", async () => {
-      const fb = new FeishuBot();
+      const fb = new FeishuBot({
+        enableStreaming: false,
+        showElapsed: false,
+        useLongConnection: false,
+      });
       const sendSpy = spyOn(fb, "sendMessage").mockResolvedValue(undefined);
       const event = createFeishuMessageEvent("你好");
       const res = await fb.handleEvent(event);

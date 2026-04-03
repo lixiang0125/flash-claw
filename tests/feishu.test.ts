@@ -5,7 +5,11 @@ describe("FeishuBot DI", () => {
   let bot: FeishuBot;
 
   beforeEach(() => {
-    bot = new FeishuBot();
+    bot = new FeishuBot({
+      enableStreaming: false,
+      showElapsed: false,
+      useLongConnection: false,
+    });
   });
 
   it("构造函数不应自动启动 WebSocket", () => {
@@ -41,8 +45,9 @@ describe("FeishuBot DI", () => {
         },
       },
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("ChatEngine not available");
+    const payload = result as { success: boolean; error?: string };
+    expect(payload.success).toBe(false);
+    expect(payload.error).toBe("ChatEngine not available");
   });
 
   it("handleEvent 注入 ChatEngine 后应正常处理消息", async () => {
@@ -64,12 +69,45 @@ describe("FeishuBot DI", () => {
         },
       },
     });
-    expect(result.success).toBe(true);
+    const payload = result as { success: boolean };
+    expect(payload.success).toBe(true);
     expect(mockEngine.chat).toHaveBeenCalled();
     expect(sendSpy).toHaveBeenCalled();
     if (sendSpy.mock.calls.length > 0) {
       expect(sendSpy.mock.calls[0]![0]).toBe("test_chat");
     }
+  });
+
+  it("handleEvent 应传递隔离后的 sessionId 与 userId", async () => {
+    const mockEngine = {
+      chat: mock(() => Promise.resolve({ response: "你好！" })),
+    };
+    bot.setChatEngine(mockEngine);
+
+    spyOn(bot, "sendMessage").mockResolvedValue(undefined);
+
+    await bot.handleEvent({
+      type: "message",
+      event: {
+        tenant_key: "tenant_a",
+        message: {
+          chat_id: "test_chat",
+          content: JSON.stringify({ text: "hello" }),
+          message_type: "text",
+          sender: { sender_id: { user_id: "u1" } },
+        },
+      },
+    });
+
+    expect(mockEngine.chat).toHaveBeenCalledTimes(1);
+    const chatCalls = (mockEngine.chat as unknown as {
+      mock: {
+        calls: Array<[{ sessionId: string; userId: string }]>;
+      };
+    }).mock.calls;
+    const request = chatCalls[0]?.[0];
+    expect(request?.sessionId).toBe("feishu:default:tenant_a:test_chat:u1");
+    expect(request?.userId).toBe("feishu:default:tenant_a:u1");
   });
 
   it("handleEvent url_verification 应返回 challenge", async () => {
@@ -78,7 +116,8 @@ describe("FeishuBot DI", () => {
       header: { event_type: "url_verification", event_id: "ev_123" },
       challenge: "test_challenge",
     });
-    expect(result.challenge).toBeDefined();
+    const payload = result as { challenge?: string };
+    expect(payload.challenge).toBeDefined();
   });
 
   it("start() 未配置时不应抛错", () => {
@@ -86,7 +125,7 @@ describe("FeishuBot DI", () => {
   });
 
   it("isConfigured 无配置时应返回 false", () => {
-    const cleanBot = new FeishuBot();
+    const cleanBot = new FeishuBot({});
     expect(typeof cleanBot.isConfigured()).toBe("boolean");
   });
 

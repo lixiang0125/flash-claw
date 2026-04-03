@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-04-03 (29)
+
+### feat: 多飞书机器人管理器 + 路由分发 + 会话/记忆隔离
+
+- 新增 `src/integrations/feishu-manager.ts`：统一管理多个飞书机器人，支持 `FEISHU_BOTS` / `FEISHU_DEFAULT_BOT_ID` 配置、按 `botId` 路由，以及按 `header.app_id` / token 自动识别。
+- 重构 `src/integrations/feishu.ts`：`FeishuBot` 改为显式配置实例，保留 legacy 单机器人环境变量兼容；统一 WebSocket / webhook 消息上下文，向 `ChatEngine` 透传隔离后的 `sessionId` 与 `userId`。
+- 飞书会话与长期记忆隔离规则升级为 `feishu:${connectorId}:${tenantKey}:${chatId}:${userId}` / `feishu:${connectorId}:${tenantKey}:${userId}`，修复飞书入口未传 `userId` 时长期记忆落到默认用户的问题。
+- `src/infra/hono-app.ts` 增加多机器人回调与状态路由：`/api/webhooks/feishu/:botId`、`/api/webhooks/feishu/:botId/status`，并保留 `/api/feishu/webhook` 旧路径别名。
+- `src/core/container/bootstrap.ts` 的 `FEISHU_BOT` DI token 现在注入管理器实例，但对外接口保持兼容，旧单机器人部署无需改代码即可继续运行。
+
+### fix: 飞书任务/心跳通知携带结构化目标，避免多机器人场景发错群
+
+- `src/tasks/index.ts` 新增结构化 `notificationTarget` 持久化；任务创建时冻结来源 target，执行时再按保存的 connector/chat 发送通知。
+- `src/heartbeat/index.ts` 与 `src/core/container/bootstrap.ts` 优先走 `notifyTarget()`，在缺少 target 时才回退到旧的 `chatId` 通知方式。
+- 保留 `setLastChatId()` / `getLastChatId()` 兼容层，避免旧调用链断裂。
+
+### fix: grepTool 使用 execFile，修复正则与带空格查询被 shell 转义破坏
+
+- `src/tools/builtin/grep.ts` 从 `exec(args.join(" "))` 改为 `execFile("rg", args)`，修复正则搜索、带空格查询和匹配详情在不同 shell 下不稳定的问题。
+
+### test: 补齐多飞书机器人与通知目标回归覆盖
+
+- 新增 `tests/feishu-manager.test.ts`，覆盖 legacy 单机器人兼容、多机器人显式路由、按 `app_id` 自动分发，以及 `notifyTarget()` 路由。
+- 更新 `tests/feishu.test.ts`、`tests/integration.test.ts`、`tests/hono-app.test.ts`、`tests/tasks.test.ts`，覆盖隔离后的 `sessionId` / `userId`、命名路由、通知目标冻结等关键路径。
+- 修正 `src/core/container/bootstrap.test.ts` 的端口断言，使其跟随当前环境配置。
+- 验证：`bun run typecheck`、`bun test --run` 全部通过。
+
 ## 2026-03-28 (28)
 
 ### fix: 减少飞书浏览器搜索在百度首页卡住的问题

@@ -1,6 +1,7 @@
 import { CronExpressionParser } from "cron-parser";
 import fs from "fs";
 import path from "path";
+import type { FeishuNotificationTarget } from "../integrations/feishu";
 
 // ---------------------------------------------------------------------------
 // Public interfaces — kept compatible with the old SQLite-backed API
@@ -60,6 +61,7 @@ interface Job {
   updatedAt: string;
   schedule: Schedule;
   message: string;
+  notificationTarget?: FeishuNotificationTarget;
   state: JobState;
   runs: RunRecord[];
 }
@@ -74,7 +76,11 @@ interface JobsFile {
 // ---------------------------------------------------------------------------
 
 type TaskExecutor = (taskMessage: string, taskId: string) => Promise<string>;
-type TaskNotifier = (taskName: string, result: string) => Promise<void>;
+type TaskNotifier = (
+  taskName: string,
+  result: string,
+  target: FeishuNotificationTarget | null,
+) => Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,6 +107,7 @@ export class TaskScheduler {
   private notifier: TaskNotifier | null = null;
   private executing = new Set<string>();
   private lastChatId: string | null = null;
+  private lastNotificationTarget: FeishuNotificationTarget | null = null;
 
   constructor(filePath?: string) {
     const custom = process.env.TASKS_JSON_PATH;
@@ -122,10 +129,25 @@ export class TaskScheduler {
 
   setLastChatId(chatId: string): void {
     this.lastChatId = chatId;
+    if (this.lastNotificationTarget) {
+      this.lastNotificationTarget = {
+        ...this.lastNotificationTarget,
+        chatId,
+      };
+    }
   }
 
   getLastChatId(): string | null {
     return this.lastChatId;
+  }
+
+  setLastNotificationTarget(target: FeishuNotificationTarget): void {
+    this.lastNotificationTarget = { ...target };
+    this.lastChatId = target.chatId;
+  }
+
+  getLastNotificationTarget(): FeishuNotificationTarget | null {
+    return this.lastNotificationTarget ? { ...this.lastNotificationTarget } : null;
   }
 
   // ---- File I/O ------------------------------------------------------------
@@ -259,6 +281,7 @@ export class TaskScheduler {
       updatedAt: now,
       schedule,
       message: task.message,
+      notificationTarget: this.cloneNotificationTarget(this.lastNotificationTarget) ?? undefined,
       state: {
         lastRunAt: null,
         lastStatus: null,
@@ -299,6 +322,7 @@ export class TaskScheduler {
       updatedAt: now,
       schedule,
       message: task.message,
+      notificationTarget: this.cloneNotificationTarget(this.lastNotificationTarget) ?? undefined,
       state: {
         lastRunAt: null,
         lastStatus: null,
@@ -445,7 +469,11 @@ export class TaskScheduler {
 
       // Notify (non-blocking)
       if (this.notifier) {
-        this.notifier(job.name, response).catch((e) =>
+        this.notifier(
+          job.name,
+          response,
+          this.cloneNotificationTarget(job.notificationTarget ?? this.lastNotificationTarget),
+        ).catch((e) =>
           console.error("[TaskScheduler] Notification failed:", e),
         );
       }
@@ -510,6 +538,24 @@ export class TaskScheduler {
     if (job.runs.length > MAX_RUNS_PER_JOB) {
       job.runs.length = MAX_RUNS_PER_JOB;
     }
+  }
+
+  /**
+   * 任务创建时要冻结通知目标，避免后续最近会话变化把老任务的通知路由带偏。
+   */
+  private cloneNotificationTarget(
+    target: FeishuNotificationTarget | null | undefined,
+  ): FeishuNotificationTarget | null {
+    if (!target) {
+      return null;
+    }
+
+    return {
+      platform: target.platform,
+      connectorId: target.connectorId,
+      chatId: target.chatId,
+      tenantKey: target.tenantKey,
+    };
   }
 
   // ---- Scheduling internals ------------------------------------------------
@@ -646,4 +692,3 @@ export class TaskScheduler {
     }
   }
 }
-

@@ -60,7 +60,7 @@ import { webSearchTool } from "../../tools/builtin/web-search";
 import { webFetchTool } from "../../tools/builtin/web-fetch";
 import { browserTool } from "../../tools/builtin/browser";
 import { ChatEngine } from "../../chat/engine";
-import { FeishuBot } from "../../integrations/feishu";
+import { FeishuBotManager } from "../../integrations/feishu-manager";
 import { TaskScheduler } from "../../tasks";
 import { HeartbeatSystem } from "../../heartbeat";
 import { SubAgentSystem } from "../../subagents";
@@ -526,7 +526,7 @@ export function createContainer(): Container {
     token: FEISHU_BOT,
     lifecycle: Lifecycle.Singleton,
     factory: () => {
-      return new FeishuBot();
+      return new FeishuBotManager();
     },
   });
 
@@ -604,16 +604,23 @@ export async function bootstrap(): Promise<Container> {
     });
 
     // 注入通知器：任务执行完成后通过飞书发送结果
-    ts.setNotifier(async (taskName: string, result: string) => {
+    ts.setNotifier(async (taskName: string, result: string, target) => {
       if (fb.isConfigured()) {
         try {
+          const fallbackTarget = ts.getLastNotificationTarget?.() ?? null;
+          const effectiveTarget = target ?? fallbackTarget;
           const lastChatId = ts.getLastChatId?.() || "";
-          if (!lastChatId) {
+          if (!effectiveTarget && !lastChatId) {
             tsLogger.warn("[TaskScheduler] No lastChatId, skipping notification");
             return;
           }
           const summary = result.length > 500 ? result.slice(0, 500) + "..." : result;
-          await fb.notify(lastChatId, `✅ 任务「${taskName}」执行完成:\n${summary}`);
+          const message = `✅ 任务「${taskName}」执行完成:\n${summary}`;
+          if (effectiveTarget && fb.notifyTarget) {
+            await fb.notifyTarget(effectiveTarget, message);
+          } else if (lastChatId) {
+            await fb.notify(lastChatId, message);
+          }
         } catch (e) {
           tsLogger.error("[TaskScheduler] Notification send failed", { err: e });
         }
@@ -629,7 +636,7 @@ export async function bootstrap(): Promise<Container> {
     // 注入飞书机器人的依赖：ChatEngine + TaskScheduler，然后启动
     fb.setChatEngine(ce);
     fb.setTaskScheduler(ts);
-    fb.start();
+    await fb.start();
     tsLogger.info("FeishuBot DI wired and started");
 
     // 注入心跳系统的依赖：ChatEngine + TaskScheduler + FeishuBot，然后启动

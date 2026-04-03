@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import path from "path";
 import fs from "fs";
+import type { FeishuNotificationTarget } from "../integrations/feishu";
 
 export interface HeartbeatCheck {
   name: string;
@@ -35,11 +36,13 @@ interface ChatEngineAPI {
 interface TaskSchedulerAPI {
   listTasks(): { enabled: boolean; nextRun?: string }[];
   getLastChatId(): string | null;
+  getLastNotificationTarget?(): FeishuNotificationTarget | null;
 }
 
 interface FeishuBotAPI {
   getStatus?(): { connected: boolean };
   notify?(chatId: string, message: string): Promise<void>;
+  notifyTarget?(target: FeishuNotificationTarget, message: string): Promise<void>;
 }
 
 export class HeartbeatSystem {
@@ -355,8 +358,9 @@ export class HeartbeatSystem {
   async notify(results: HeartbeatResult[]): Promise<void> {
     if (results.length === 0) return;
 
+    const lastTarget = this.taskSchedulerAPI?.getLastNotificationTarget?.() ?? null;
     const lastChatId = this.taskSchedulerAPI?.getLastChatId() ?? null;
-    if (!lastChatId) {
+    if (!lastTarget && !lastChatId) {
       console.log("[Heartbeat] No chat ID available for notification");
       return;
     }
@@ -367,7 +371,11 @@ export class HeartbeatSystem {
     const message = this.formatNotification(errorResults);
 
     try {
-      await this.feishuBotAPI?.notify?.(lastChatId, message);
+      if (lastTarget && this.feishuBotAPI?.notifyTarget) {
+        await this.feishuBotAPI.notifyTarget(lastTarget, message);
+      } else if (lastChatId) {
+        await this.feishuBotAPI?.notify?.(lastChatId, message);
+      }
       console.log("[Heartbeat] Notification sent to Feishu");
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : "Unknown error";

@@ -35,6 +35,10 @@ import type {
   EvolutionStrategy,
   EvolutionReport,
 } from "../../evolution/types";
+import type {
+  FeishuNotificationTarget,
+  FeishuRoutingOptions,
+} from "../../integrations/feishu";
 
 // Re-export so consumers can import from tokens
 export type { ConversationMessage } from "../../memory/working-memory";
@@ -679,18 +683,21 @@ export const CHAT_ENGINE: ServiceToken<IChatEngine> =
  * @interface IFeishuBot
  */
 export interface IFeishuBot {
-  handleEvent(body: unknown): Promise<unknown>;
-  isConfigured(): boolean;
-  getConfig(): unknown;
+  handleEvent(body: unknown, options?: FeishuRoutingOptions): Promise<unknown>;
+  isConfigured(connectorId?: string): boolean;
+  getConfig(connectorId?: string): unknown;
   setChatEngine(engine: {
-    chat(request: { message: string; sessionId: string }): Promise<{ response: string }>;
+    chat(request: { message: string; sessionId: string; userId?: string }): Promise<{ response: string }>;
   }): void;
   setTaskScheduler(scheduler: {
     setLastChatId(chatId: string): void;
+    setLastNotificationTarget?(target: FeishuNotificationTarget): void;
   }): void;
-  start(): void;
+  start(): Promise<void>;
   sendMessage(chatId: string, userId?: unknown, text?: string): Promise<void>;
   notify(chatId: string, text: string): Promise<void>;
+  notifyTarget?(target: FeishuNotificationTarget, text: string): Promise<void>;
+  getStatus?(): { connected: boolean };
 }
 
 /**
@@ -740,10 +747,16 @@ export interface ITaskScheduler {
     fn: (taskMessage: string, taskId: string) => Promise<string>,
   ): void;
   setNotifier(
-    fn: (taskName: string, result: string) => Promise<void>,
+    fn: (
+      taskName: string,
+      result: string,
+      target: FeishuNotificationTarget | null,
+    ) => Promise<void>,
   ): void;
   setLastChatId(chatId: string): void;
   getLastChatId(): string | null;
+  setLastNotificationTarget(target: FeishuNotificationTarget): void;
+  getLastNotificationTarget(): FeishuNotificationTarget | null;
   start(): void;
   stop(): void;
 }
@@ -774,10 +787,12 @@ export interface IHeartbeatSystem {
   setTaskScheduler(scheduler: {
     listTasks(): { enabled: boolean; nextRun?: string }[];
     getLastChatId(): string | null;
+    getLastNotificationTarget?(): FeishuNotificationTarget | null;
   }): void;
   setFeishuBot(bot: {
     getStatus?(): { connected: boolean };
     notify?(chatId: string, message: string): Promise<void>;
+    notifyTarget?(target: FeishuNotificationTarget, message: string): Promise<void>;
   }): void;
   start(): void;
 }

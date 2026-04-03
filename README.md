@@ -32,7 +32,7 @@
 - **9 个内置工具** — bash、文件读写编辑、glob/grep 搜索、Web 搜索抓取、本地浏览器 CDP 接管
 - **Skill 系统** — 兼容 Claude Code Agent Skills 标准，内置 10 个 Skill
 - **任务调度** — cron / interval / one-time 三种模式，LLM 智能解析多语言任务意图
-- **飞书集成** — Webhook + WebSocket 长连接双模式，流式卡片输出 + 耗时计时
+- **飞书集成** — 单机器人兼容 + 多机器人管理器，Webhook / WebSocket 双模式，流式卡片输出 + 耗时计时
 - **性能优化** — Embedding LRU 缓存、Memory 超时保护、启动预热、全链路计时埋点
 - **安全层** — 路径边界检查、命令安全过滤、速率限制、SSRF 防护、审计日志
 - **DI 容器** — 自研 IoC 容器，24 个服务 Token，循环依赖检测与有序销毁
@@ -503,83 +503,120 @@ Flash-Claw：已创建定时任务
 
 ## 飞书集成
 
-Flash-Claw 支持两种飞书接入模式：
+Flash-Claw 现在支持两种配置方式：
 
-### Webhook 模式
+- **Legacy 单机器人模式**：继续读取 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 等现有环境变量，不破坏旧部署。
+- **多机器人模式**：通过 `FEISHU_BOTS` 一次注册多个飞书机器人，并由管理器按路由 / `app_id` / token 自动分发。
+
+### 接入模式
+
+无论单机器人还是多机器人，都支持以下两种飞书接入模式：
+
+#### Webhook 模式
 
 - 配置飞书事件订阅回调 URL
 - 适合简单场景，无需维护长连接
 - 支持消息事件、卡片交互
 
-### WebSocket 长连接模式
+#### WebSocket 长连接模式
 
 - 基于飞书开放平台 WebSocket 协议
 - 多层重试策略：5 次指数退避 + 后台静默重连（每 2 分钟）
 - 连接状态检测：通过 SDK 日志拦截自动判断连接成功/失败
 - 适合高实时性场景
 
-### 流式卡片输出
+### 会话与记忆隔离
 
-飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
+多机器人模式下，飞书消息会自动生成带 `connectorId` 和 `tenantKey` 的隔离 key：
 
-- 流式路径会继续执行 Tool Calling，`browser`、`web_search`、任务调度等能力在飞书流式模式下同样可用
-
-#### 双模式自动切换
-
-| 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
-|------|-----|----------|----------|----------|
-| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 300ms |
-| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message` | 5 QPS | 1500ms |
-
-- 首次调用 CardKit API 时若权限不足（错误码 `99991672`），自动且永久切换为 PATCH 模式
-- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
-
-#### 流式配置
-
-```bash
-# .env
-FEISHU_STREAMING=true              # 启用流式输出（默认 true）
-FEISHU_SHOW_ELAPSED=true           # 显示耗时统计（默认 true）
+```text
+sessionId = feishu:${connectorId}:${tenantKey}:${chatId}:${userId}
+userId    = feishu:${connectorId}:${tenantKey}:${userId}
 ```
 
+- 不同机器人、不同租户、不同群聊不会串会话
+- 长期记忆也按 `userId` 进行隔离，不再落到默认用户
 
-### 流式卡片输出
-
-飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
-
-- 流式路径会继续执行 Tool Calling，`browser`、`web_search`、任务调度等能力在飞书流式模式下同样可用
-
-#### 双模式自动切换
-
-| 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
-|------|-----|----------|----------|----------|
-| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 300ms |
-| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message` | 5 QPS | 1500ms |
-
-- 首次调用 CardKit API 时若权限不足（错误码 `99991672`），自动且永久切换为 PATCH 模式
-- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
-
-#### 流式配置
-
-```bash
-# .env
-FEISHU_STREAMING=true              # 启用流式输出（默认 true）
-FEISHU_SHOW_ELAPSED=true           # 显示耗时统计（默认 true）
-```
-
-
-### 配置
+### 单机器人兼容配置
 
 ```bash
 # .env
 FEISHU_APP_ID=cli_xxxxx
 FEISHU_APP_SECRET=xxxxx
-FEISHU_ENCRYPT_KEY=xxxxx          # 可选，事件加密
-FEISHU_VERIFICATION_TOKEN=xxxxx   # 可选，事件验证
+FEISHU_ENCRYPT_KEY=xxxxx           # 可选，事件加密
+FEISHU_VERIFICATION_TOKEN=xxxxx    # 可选，事件验证
 
 # 连接模式（二选一）
-FEISHU_MODE=webhook               # 或 websocket
-FEISHU_WEBHOOK_PORT=3001          # webhook 模式端口
+FEISHU_MODE=webhook                # 或 websocket
+# 兼容旧配置；若设置了 FEISHU_MODE，则 FEISHU_MODE 优先
+FEISHU_USE_LONG_CONNECTION=false
+
+# 可选：如果使用自定义机器人 webhook 发送消息
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+
+# 流式卡片（单机器人 legacy 开关）
+FEISHU_STREAMING=true
+FEISHU_SHOW_ELAPSED=true
+```
+
+### 多机器人配置
+
+```bash
+# .env
+FEISHU_DEFAULT_BOT_ID=ops
+FEISHU_BOTS='{
+  "ops": {
+    "appId": "cli_ops_xxxxx",
+    "appSecret": "ops_secret",
+    "verificationToken": "ops_token",
+    "useLongConnection": false,
+    "enableStreaming": true,
+    "showElapsed": true
+  },
+  "sales": {
+    "appId": "cli_sales_xxxxx",
+    "appSecret": "sales_secret",
+    "verificationToken": "sales_token",
+    "useLongConnection": true,
+    "enableStreaming": true,
+    "showElapsed": true
+  }
+}'
+```
+
+- 命名回调路由使用 `/api/webhooks/feishu/:botId`
+- 不带 `:botId` 的回调会优先按 `header.app_id` / token 自动识别；识别失败时回退到 `FEISHU_DEFAULT_BOT_ID`
+- `FEISHU_BOTS` 支持 JSON 数组或对象映射；对象 key 会作为 `botId`
+
+### 流式卡片输出
+
+飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
+
+- 流式路径会继续执行 Tool Calling，`browser`、`web_search`、任务调度等能力在飞书流式模式下同样可用
+- 多机器人模式下可在每个 bot 的配置里独立设置 `enableStreaming` / `showElapsed`
+
+#### 双模式自动切换
+
+| 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
+|------|-----|----------|----------|----------|
+| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 300ms |
+| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message` | 5 QPS | 1500ms |
+
+- 首次调用 CardKit API 时若权限不足（错误码 `99991672`），自动且永久切换为 PATCH 模式
+- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
+
+### 配置摘要
+
+```bash
+# 默认路由
+POST /api/webhooks/feishu
+
+# 多机器人命名路由
+POST /api/webhooks/feishu/:botId
+
+# 兼容旧路径
+POST /api/feishu/webhook
+POST /api/feishu/webhook/:botId
 ```
 
 ---
@@ -642,7 +679,12 @@ FEISHU_WEBHOOK_PORT=3001          # webhook 模式端口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/feishu/webhook` | 飞书事件回调 |
+| `POST` | `/api/webhooks/feishu` | 默认 / 自动识别飞书事件回调 |
+| `POST` | `/api/webhooks/feishu/:botId` | 指定机器人事件回调 |
+| `GET` | `/api/webhooks/feishu/status` | 飞书机器人总状态 |
+| `GET` | `/api/webhooks/feishu/:botId/status` | 指定机器人状态 |
+| `POST` | `/api/feishu/webhook` | 旧路径别名 |
+| `POST` | `/api/feishu/webhook/:botId` | 旧路径别名 |
 
 ---
 
@@ -744,7 +786,8 @@ flash-claw/
 │   │                                 #   JSON 存储 / cron+interval+one-time
 │   │
 │   ├── integrations/                 # 飞书集成
-│   │   ├── feishu.ts                 #   FeishuBot（Webhook + WebSocket + 流式卡片）
+│   │   ├── feishu.ts                 #   FeishuBot（单 bot 实例，负责会话/记忆隔离）
+│   │   ├── feishu-manager.ts         #   多飞书机器人管理器与路由分发
 │   │   └── feishu-streaming-card.ts  #   流式卡片服务（CardKit + PATCH 双模式）
 │   │
 │   ├── heartbeat/                    # 心跳系统
@@ -805,11 +848,16 @@ flash-claw/
 |------|------|--------|
 | `FEISHU_APP_ID` | 飞书应用 ID | — |
 | `FEISHU_APP_SECRET` | 飞书应用 Secret | — |
+| `FEISHU_BOTS` | 多机器人 JSON 配置（数组或对象映射） | — |
+| `FEISHU_DEFAULT_BOT_ID` | 多机器人默认 botId | 首个可用 bot |
 | `FEISHU_ENCRYPT_KEY` | 事件加密 Key | — |
 | `FEISHU_VERIFICATION_TOKEN` | 事件验证 Token | — |
-| `FEISHU_MODE` | 连接模式（`webhook` / `websocket`） | `webhook` |
-| `FEISHU_STREAMING` | 启用流式卡片输出 | `true` |
-| `FEISHU_SHOW_ELAPSED` | 显示回复耗时统计 | `true` |
+| `FEISHU_MODE` | Legacy 单机器人连接模式（`webhook` / `websocket`） | `webhook` |
+| `FEISHU_USE_LONG_CONNECTION` | Legacy 单机器人长连接开关 | `true` |
+| `FEISHU_WEBHOOK_URL` | Legacy 单机器人发送消息的 webhook URL | — |
+| `FEISHU_STREAMING` | Legacy 单机器人流式开关 | `true` |
+| `FEISHU_SHOW_ELAPSED` | Legacy 单机器人耗时 footer 开关 | `true` |
+
 ### 服务器
 
 | 变量 | 说明 | 默认值 |

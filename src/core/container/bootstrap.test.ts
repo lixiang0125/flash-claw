@@ -41,7 +41,7 @@ describe("Bootstrap", () => {
 
     // 验证可以解析服务
     const config = container.resolve(CONFIG);
-    expect(config.port).toBe(3000);
+    expect(config.port).toBe(Number(process.env.PORT ?? "3000"));
 
     const logger = container.resolve(LOGGER);
     expect(logger.info).toBeDefined();

@@ -61,6 +61,24 @@ describe("TaskScheduler", () => {
       ts.setLastChatId("chat_123");
       expect(ts.getLastChatId()).toBe("chat_123");
     });
+
+    it("setLastNotificationTarget / getLastNotificationTarget 往返", () => {
+      const ts = makeTempScheduler();
+      expect(ts.getLastNotificationTarget()).toBeNull();
+      ts.setLastNotificationTarget({
+        platform: "feishu",
+        connectorId: "ops",
+        chatId: "chat_123",
+        tenantKey: "tenant_a",
+      });
+      expect(ts.getLastNotificationTarget()).toEqual({
+        platform: "feishu",
+        connectorId: "ops",
+        chatId: "chat_123",
+        tenantKey: "tenant_a",
+      });
+      expect(ts.getLastChatId()).toBe("chat_123");
+    });
   });
 
   describe("createTask", () => {
@@ -197,6 +215,43 @@ describe("TaskScheduler", () => {
       await ts.runTask(t.id);
       await ts.runTask(t.id);
       expect(ts.getTaskRuns(t.id).length).toBe(2);
+    });
+
+    it("任务通知应冻结创建时的 notification target", async () => {
+      const ts = makeTempScheduler();
+      const notifier = mock(() => Promise.resolve());
+      ts.setExecutor(mock(() => Promise.resolve("ok")));
+      ts.setNotifier(notifier);
+      ts.setLastNotificationTarget({
+        platform: "feishu",
+        connectorId: "ops",
+        chatId: "chat_ops",
+      });
+
+      const task = ts.createTask({
+        name: "Notify",
+        message: "m",
+        schedule: "every:60000",
+        enabled: true,
+      });
+
+      ts.setLastNotificationTarget({
+        platform: "feishu",
+        connectorId: "sales",
+        chatId: "chat_sales",
+      });
+
+      await ts.runTask(task.id);
+
+      expect(notifier).toHaveBeenCalledTimes(1);
+      const callArgs = notifier.mock.calls[0] as
+        | [string, string, { platform: "feishu"; connectorId: string; chatId: string } | null]
+        | undefined;
+      expect(callArgs?.[2]).toEqual({
+        platform: "feishu",
+        connectorId: "ops",
+        chatId: "chat_ops",
+      });
     });
   });
 
