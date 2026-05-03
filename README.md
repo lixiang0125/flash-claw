@@ -40,6 +40,21 @@
 
 ---
 
+## Agent 与文档治理
+
+Flash-Claw 采用单入口 Agent 规则方案：
+
+- `AGENTS.md` 是 Codex、Claude 和其他 AI agent 的统一执行契约入口。
+- `CLAUDE.md` 通过软链指向 `AGENTS.md`，避免两份规则并行维护后漂移。
+- `docs/README.md` 维护规则库与知识库索引。
+- `docs/rules/development-guide.md` 维护开发规范、验证要求、文档同步和提交流程。
+- `docs/knowledge-base/` 维护项目概览、飞书接入、Skill 与工具系统等长期知识。
+- `docs/test/verification-matrix.md` 维护不同变更类型对应的验证命令。
+
+开始修改代码前先读 `AGENTS.md`，再按任务范围阅读 `docs/README.md` 中列出的对应文档。涉及飞书、多 channel 记忆、工具安全或 DI 边界时，必须同步更新对应知识库。
+
+---
+
 ## 快速开始
 
 ### 前置要求

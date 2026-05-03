@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-03 (30)
+
+### docs: 落地单入口 Agent 规则与项目知识库
+
+- 参考 `i18n_ecom_growth_strategy` 的治理方式，将 `AGENTS.md` 收敛为 Flash-Claw 的唯一 Agent 执行契约入口，并要求 `CLAUDE.md` 通过软链指向 `AGENTS.md`，避免多份规则漂移。
+- 新增 `docs/README.md`、`docs/rules/development-guide.md`、`docs/test/verification-matrix.md`，把开发规范、验证矩阵、文档同步和提交流程从顶层规则中拆到规则库。
+- 新增 `docs/knowledge-base/project-overview.md`、`docs/knowledge-base/feishu-integration.md`、`docs/knowledge-base/skills-and-tools.md`，沉淀项目结构、飞书多机器人接入、Skill 与工具系统知识。
+- 将已有 `docs/channel-shared-memory-design.md` 纳入 docs 索引，作为多 channel 共享长期记忆与隔离会话的设计草案入口。
+
 ## 2026-04-03 (29)
 
 ### feat: 多飞书机器人管理器 + 路由分发 + 会话/记忆隔离
