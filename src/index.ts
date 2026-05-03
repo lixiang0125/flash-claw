@@ -22,6 +22,7 @@ async function main() {
   
   logger.info("FlashClaw started successfully", { 
     port: config.port,
+    host: config.host,
     env: config.env,
     services: container.getRegisteredServices().length,
   });
@@ -30,10 +31,11 @@ async function main() {
   
   serve({
     port: config.port,
+    hostname: config.host,
     fetch: httpServer.fetch as (req: Request) => Promise<Response>,
   });
   
-  console.log(`[Bootstrap] Server listening on port ${config.port}`);
+  console.log(`[Bootstrap] Server listening on ${config.host}:${config.port}`);
 }
 
 main().catch((err) => {

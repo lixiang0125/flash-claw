@@ -6,13 +6,16 @@ import { Lifecycle } from "./container";
 describe("Bootstrap", () => {
   let container: any;
   let originalApiKey: string | undefined;
+  let originalNodeEnv: string | undefined;
 
   beforeEach(() => {
     // 保存并设置环境变量，避免 mem0 因缺少 API key 而抛错
     originalApiKey = process.env.OPENAI_API_KEY;
+    originalNodeEnv = process.env.NODE_ENV;
     if (!process.env.OPENAI_API_KEY) {
       process.env.OPENAI_API_KEY = "test-dummy-key-for-bootstrap";
     }
+    process.env.NODE_ENV = "test";
   });
 
   afterEach(() => {
@@ -21,6 +24,11 @@ describe("Bootstrap", () => {
       delete process.env.OPENAI_API_KEY;
     } else {
       process.env.OPENAI_API_KEY = originalApiKey;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
     }
   });
 
@@ -42,6 +50,7 @@ describe("Bootstrap", () => {
     // 验证可以解析服务
     const config = container.resolve(CONFIG);
     expect(config.port).toBe(Number(process.env.PORT ?? "3000"));
+    expect(config.host).toBe(process.env.HOST || "127.0.0.1");
 
     const logger = container.resolve(LOGGER);
     expect(logger.info).toBeDefined();

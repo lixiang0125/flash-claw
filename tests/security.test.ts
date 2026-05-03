@@ -169,6 +169,12 @@ describe("SecurityLayer", () => {
       const result = security.checkCommand(cmd);
       expect(result.allowed).toBe(false);
     });
+
+    test("fails closed when command parsing cannot be trusted", () => {
+      const result = security.checkCommand("echo \"unterminated");
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("Unable to parse command safely");
+    });
   });
 
   // -----------------------------------------------

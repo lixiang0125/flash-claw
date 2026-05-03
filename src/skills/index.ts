@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { execFile as execFileSync } from "child_process";
 import { promisify } from "util";
-import { validateWritePath } from "../infra/fs/boundary";
+import { validateReadPath } from "../infra/fs/boundary";
 
 const execFile = promisify(execFileSync);
 
@@ -219,7 +219,7 @@ export async function executeScript(
     let stdout = "";
     let stderr = "";
 
-    validateWritePath(skillPath);
+    validateReadPath(skillPath);
 
     if (ext === ".sh" || ext === ".bash") {
       const result = await execFile("bash", [skillPath, ...args], {

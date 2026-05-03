@@ -82,6 +82,8 @@ export interface SecurityLayer {
  * ```
  */
 export class ToolExecutor {
+  private readonly autoApproveTools: boolean;
+
   /**
    * 创建 ToolExecutor 实例。
    *
@@ -95,7 +97,10 @@ export class ToolExecutor {
     private sandboxManager: ISandboxManager,
     private securityLayer: SecurityLayer,
     private logger: Logger,
-  ) {}
+    options: { autoApproveTools?: boolean } = {},
+  ) {
+    this.autoApproveTools = options.autoApproveTools ?? process.env["FLASH_CLAW_AUTO_APPROVE_TOOLS"] === "true";
+  }
 
   /**
    * 执行指定的工具调用。
@@ -148,6 +153,17 @@ export class ToolExecutor {
         rawInput,
         startTime,
         `Validation error: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    const approvalRequired = await this.isApprovalRequired(toolDef, validatedInput);
+    if (approvalRequired && !this.autoApproveTools) {
+      return this.buildErrorResult(
+        toolName,
+        validatedInput,
+        startTime,
+        `Approval required for tool "${toolName}". Set FLASH_CLAW_AUTO_APPROVE_TOOLS=true only in trusted local environments.`,
+        true,
       );
     }
 
@@ -204,9 +220,7 @@ export class ToolExecutor {
           toolName,
           inputSummary: JSON.stringify(validatedInput).substring(0, 200),
           sandboxUsed: toolDef.requiresSandbox,
-          approvalRequired: typeof toolDef.needsApproval === "boolean"
-            ? toolDef.needsApproval
-            : false,
+          approvalRequired,
         },
       };
     } catch (err) {
@@ -268,6 +282,16 @@ export class ToolExecutor {
     return { allowed: true };
   }
 
+  private async isApprovalRequired(
+    toolDef: FlashClawToolDefinition<any, any>,
+    input: unknown,
+  ): Promise<boolean> {
+    if (typeof toolDef.needsApproval === "boolean") {
+      return toolDef.needsApproval;
+    }
+    return toolDef.needsApproval(input as never);
+  }
+
   /**
    * 构建统一格式的错误结果对象。
    *
@@ -283,6 +307,7 @@ export class ToolExecutor {
     input: unknown,
     startTime: number,
     error: string,
+    approvalRequired = false,
   ): ToolExecutionResult {
     return {
       success: false,
@@ -294,7 +319,7 @@ export class ToolExecutor {
         toolName,
         inputSummary: JSON.stringify(input).substring(0, 200),
         sandboxUsed: false,
-        approvalRequired: false,
+        approvalRequired,
       },
     };
   }

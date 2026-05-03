@@ -117,12 +117,14 @@ export type {
 export function loadConfig(): AppConfig {
   return {
     port: Number(process.env["PORT"] ?? "3000"),
+    host: process.env["HOST"]?.trim() || "127.0.0.1",
     dbPath: process.env["DB_PATH"] ?? "./data/FlashClaw.db",
     llmApiKey: process.env["LLM_API_KEY"] ?? "",
     llmModel: process.env["LLM_MODEL"] ?? "gpt-4o",
     env: (process.env["NODE_ENV"] as AppConfig["env"]) ?? "development",
     logLevel: (process.env["LOG_LEVEL"] as AppConfig["logLevel"]) ?? "info",
     workspacePath: process.env["WORKSPACE_PATH"] ?? "./data/workspace",
+    apiToken: process.env["FLASH_CLAW_API_TOKEN"]?.trim() ?? "",
   };
 }
 
@@ -315,7 +317,8 @@ export function createContainer(): Container {
         new Map(toolRegistry.getAll().map((t: FlashClawToolDefinition<any, any>) => [t.name, t])),
         sandboxManager as ISandboxManager,
         securityLayer,
-        logger
+        logger,
+        { autoApproveTools: process.env["FLASH_CLAW_AUTO_APPROVE_TOOLS"] === "true" },
       );
     },
   });
@@ -499,7 +502,14 @@ export function createContainer(): Container {
 
       const engine = new ChatEngine();
 
-      const qwenTools = toQwenTools(toolRegistry.getAll());
+      const exposeApprovalTools = process.env["FLASH_CLAW_AUTO_APPROVE_TOOLS"] === "true";
+      const exposedTools = toolRegistry.getAll().filter((tool) => {
+        if (typeof tool.needsApproval === "boolean") {
+          return !tool.needsApproval || exposeApprovalTools;
+        }
+        return exposeApprovalTools;
+      });
+      const qwenTools = toQwenTools(exposedTools);
       engine.setTools(qwenTools);
       engine.setToolExecutor(async (name: string, args: Record<string, unknown>, sessionId: string) => {
         logger.debug(`[TOOL_CALL] ${name}`, { args: JSON.stringify(args).substring(0, 200) });
@@ -576,6 +586,8 @@ export function createContainer(): Container {
         heartbeatSystem: hs,
         subAgentSystem: sa,
         logger,
+        apiToken: resolver.resolve(CONFIG).apiToken,
+        requireApiToken: resolver.resolve(CONFIG).env === "production",
       });
     },
   });
@@ -633,19 +645,24 @@ export async function bootstrap(): Promise<Container> {
     ts.start();
     tsLogger.info("TaskScheduler wired and started");
 
-    // 注入飞书机器人的依赖：ChatEngine + TaskScheduler，然后启动
-    fb.setChatEngine(ce);
-    fb.setTaskScheduler(ts);
-    await fb.start();
-    tsLogger.info("FeishuBot DI wired and started");
+    const skipExternalStartup = process.env["NODE_ENV"] === "test";
+    if (skipExternalStartup) {
+      tsLogger.info("External Feishu/Heartbeat startup skipped in test environment");
+    } else {
+      // 注入飞书机器人的依赖：ChatEngine + TaskScheduler，然后启动
+      fb.setChatEngine(ce);
+      fb.setTaskScheduler(ts);
+      await fb.start();
+      tsLogger.info("FeishuBot DI wired and started");
 
-    // 注入心跳系统的依赖：ChatEngine + TaskScheduler + FeishuBot，然后启动
-    const hs = container.resolve(HEARTBEAT_SYSTEM);
-    hs.setChatEngine(ce);
-    hs.setTaskScheduler(ts);
-    hs.setFeishuBot(fb);
-    hs.start();
-    tsLogger.info("HeartbeatSystem DI wired and started");
+      // 注入心跳系统的依赖：ChatEngine + TaskScheduler + FeishuBot，然后启动
+      const hs = container.resolve(HEARTBEAT_SYSTEM);
+      hs.setChatEngine(ce);
+      hs.setTaskScheduler(ts);
+      hs.setFeishuBot(fb);
+      hs.start();
+      tsLogger.info("HeartbeatSystem DI wired and started");
+    }
 
     // 注入子代理系统的依赖：ChatEngine
     const sa = container.resolve(SUB_AGENT_SYSTEM);

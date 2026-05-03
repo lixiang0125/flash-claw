@@ -90,15 +90,19 @@ AI 可用工具定义在 `src/tools/`：
 
 - 文件路径不能越过工作区边界。
 - Shell 命令需要经过安全过滤和审计。
+- Shell 命令解析异常必须 fail-closed，不允许因为解析失败而放行。
+- `needsApproval: true` 是强制 gate，不只是模型提示；默认不执行，除非可信本地环境显式设置 `FLASH_CLAW_AUTO_APPROVE_TOOLS=true`。
+- ChatEngine 默认只向模型暴露无需审批的工具；自动审批开启后才暴露写文件、bash、browser 等高权限工具。
 - Web fetch / browser 不能绕过 SSRF 和本机访问限制。
 - 不得在日志、工具结果或错误信息中泄露 `.env` 密钥。
 - `Grep` 使用 `execFile("rg", ...)`，避免 shell 转义破坏正则或空格查询。
+- Skill 脚本可来自 `.flashclaw/skills` 或 `.agents/skills`，脚本执行前必须通过同一套路径边界校验。
 
 修改工具或安全层时默认执行：
 
 ```bash
 bun run typecheck
-bun test --run tests/tools-builtin.test.ts tests/security.test.ts tests/browser-tool.test.ts tests/browser-helper.test.ts
+bun test --run tests/tool-executor.test.ts tests/tools-builtin.test.ts tests/security.test.ts tests/skills.test.ts tests/browser-tool.test.ts tests/browser-helper.test.ts
 ```
 
 如果变更影响 prompt 中工具描述或工具循环，追加：

@@ -1,13 +1,16 @@
 import { resolve, relative, isAbsolute } from "path";
 import { realpathSync, lstatSync, existsSync } from "fs";
 
-const ALLOWED_ROOTS = [
-  resolve(process.cwd(), ".flashclaw"),
-  resolve(process.cwd(), "skills"),
-  resolve(process.cwd(), "data"),
-];
-
 const SENSITIVE_PATTERNS = [/\.env$/, /\.git/, /node_modules/, /package\.json$/];
+
+function getAllowedRoots(): string[] {
+  return [
+    resolve(process.cwd(), ".flashclaw"),
+    resolve(process.cwd(), ".agents"),
+    resolve(process.cwd(), "skills"),
+    resolve(process.cwd(), "data"),
+  ];
+}
 
 export function validateReadPath(targetPath: string): string {
   const absPath = resolve(process.cwd(), targetPath);
@@ -22,7 +25,8 @@ export function validateWritePath(targetPath: string): string {
 }
 
 function validatePath(absPath: string, isWrite: boolean): void {
-  const isAllowed = ALLOWED_ROOTS.some((root) => {
+  const allowedRoots = getAllowedRoots();
+  const isAllowed = allowedRoots.some((root) => {
     const rel = relative(root, absPath);
     return !rel.startsWith("..") && !isAbsolute(rel);
   });
@@ -33,7 +37,7 @@ function validatePath(absPath: string, isWrite: boolean): void {
 
   try {
     const realPath = realpathSync(absPath);
-    const isRealAllowed = ALLOWED_ROOTS.some((root) => {
+    const isRealAllowed = allowedRoots.some((root) => {
       const rel = relative(root, realPath);
       return !rel.startsWith("..") && !isAbsolute(rel);
     });
@@ -54,7 +58,7 @@ function validatePath(absPath: string, isWrite: boolean): void {
 export function checkPathInBounds(targetPath: string): boolean {
   try {
     const absPath = resolve(process.cwd(), targetPath);
-    const isAllowed = ALLOWED_ROOTS.some((root) => {
+    const isAllowed = getAllowedRoots().some((root) => {
       const rel = relative(root, absPath);
       return !rel.startsWith("..") && !isAbsolute(rel);
     });

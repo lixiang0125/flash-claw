@@ -120,10 +120,10 @@ bun run start
 
 ```bash
 # 健康检查
-curl http://localhost:3090/health
+curl http://localhost:3000/health
 
 # 发送对话
-curl -X POST http://localhost:3090/api/chat \
+curl -X POST http://localhost:3000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "你好，介绍一下你自己"}'
 ```
@@ -430,7 +430,7 @@ ToolRegistry → 查找工具实现
 
 ```bash
 # .env 配置
-SANDBOX_ENABLED=true
+USE_DOCKER_SANDBOX=true
 SANDBOX_IMAGE=flash-claw-sandbox:latest
 ```
 
@@ -447,6 +447,8 @@ SANDBOX_IMAGE=flash-claw-sandbox:latest
 | **速率限制** | `security/` | 防止工具调用过于频繁 |
 | **SSRF 防护** | `infra/net/ssrf.ts` | 阻止对内网地址的请求 |
 | **审计日志** | `security/` | 记录所有工具调用与敏感操作 |
+
+生产环境默认要求为管理类 API 配置 `FLASH_CLAW_API_TOKEN`，并通过 `Authorization: Bearer <token>` 或 `X-Flash-Claw-Token` 访问。飞书 webhook、`/health` 与 `/api/status` 仍保持公开，便于外部回调和健康检查。`bash`、文件写入、浏览器等需要审批的工具默认不会暴露给模型，也不会执行；仅在可信本地环境设置 `FLASH_CLAW_AUTO_APPROVE_TOOLS=true` 后启用。
 
 ---
 
@@ -877,14 +879,16 @@ flash-claw/
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `PORT` | HTTP 服务端口 | `3090` |
-| `HOST` | 绑定地址 | `0.0.0.0` |
+| `PORT` | HTTP 服务端口 | `3000` |
+| `HOST` | 绑定地址；默认仅监听本机，确需外部访问再改为 `0.0.0.0` | `127.0.0.1` |
 
 ### 安全
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SANDBOX_ENABLED` | 是否启用 Docker 沙箱 | `false` |
+| `FLASH_CLAW_API_TOKEN` | 生产环境访问受保护 API 的 Bearer token；未配置时生产环境保护路由返回 503 | — |
+| `FLASH_CLAW_AUTO_APPROVE_TOOLS` | 是否自动执行需要审批的工具；只建议可信本地环境开启 | `false` |
+| `USE_DOCKER_SANDBOX` | 是否启用 Docker 沙箱 | `false` |
 | `SANDBOX_IMAGE` | 沙箱 Docker 镜像 | `flash-claw-sandbox:latest` |
 | `ALLOWED_PATHS` | 允许操作的路径（逗号分隔） | — |
 

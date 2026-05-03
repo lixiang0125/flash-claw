@@ -18,7 +18,8 @@ Flash-Claw 是 Bun + Hono + React + OpenAI-compatible SDK 驱动的本地 AI 智
 | --- | --- | --- | --- |
 | 飞书/IM/webhook/通知变更 | `docs/knowledge-base/feishu-integration.md` | `bun run typecheck`、`bun test --run tests/feishu.test.ts tests/feishu-manager.test.ts tests/hono-app.test.ts tests/tasks.test.ts` | 必要时启动服务做 webhook smoke |
 | 对话引擎/记忆变更 | `docs/knowledge-base/project-overview.md`、`docs/channel-shared-memory-design.md` | `bun run typecheck`、相关 `tests/engine.test.ts` / `tests/working-memory.test.ts` | `bun test --run` |
-| 工具/沙箱/安全变更 | `docs/knowledge-base/skills-and-tools.md` | `bun run typecheck`、`bun test --run tests/tools-builtin.test.ts tests/security.test.ts` | 需要时补手动沙箱 smoke |
+| HTTP API/认证/健康检查变更 | `docs/knowledge-base/project-overview.md` | `bun run typecheck`、`bun test --run tests/hono-app.test.ts` | 启动配置变更追加 `src/core/container/bootstrap.test.ts` |
+| 工具/沙箱/安全变更 | `docs/knowledge-base/skills-and-tools.md` | `bun run typecheck`、`bun test --run tests/tool-executor.test.ts tests/tools-builtin.test.ts tests/security.test.ts tests/skills.test.ts` | 需要时补 browser / sandbox smoke |
 | Web UI 变更 | `docs/knowledge-base/project-overview.md` | `bun run typecheck`、`bun run build:web` | 浏览器手动 smoke |
 | 根脚本/配置变更 | 当前文档即可 | 对应脚本 dry-run 或语法检查 | `bun run typecheck` |
 | 纯文档变更 | 当前文档即可 | `bun run typecheck` 可按风险豁免 | 无 |

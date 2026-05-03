@@ -23,7 +23,8 @@
 | 飞书机器人 / webhook / 多机器人路由 | `bun run typecheck`、`bun test --run tests/feishu.test.ts tests/feishu-manager.test.ts tests/hono-app.test.ts tests/tasks.test.ts` | `bun test --run src/core/container/bootstrap.test.ts tests/integration.test.ts` |
 | 任务调度 / 心跳 | `bun run typecheck`、`bun test --run tests/tasks.test.ts` | 飞书通知相关追加 `tests/feishu-manager.test.ts` |
 | Skill 系统 | `bun run typecheck`、`bun test --run tests/skills.test.ts` | `bun test --run` |
-| 工具 / 沙箱 / 安全 | `bun run typecheck`、`bun test --run tests/tools-builtin.test.ts tests/security.test.ts` | browser 相关追加 `tests/browser-tool.test.ts tests/browser-helper.test.ts` |
+| HTTP API / 认证 / 健康检查 | `bun run typecheck`、`bun test --run tests/hono-app.test.ts` | 涉及启动配置追加 `src/core/container/bootstrap.test.ts` |
+| 工具 / 沙箱 / 安全 | `bun run typecheck`、`bun test --run tests/tool-executor.test.ts tests/tools-builtin.test.ts tests/security.test.ts tests/skills.test.ts` | browser 相关追加 `tests/browser-tool.test.ts tests/browser-helper.test.ts` |
 | LLM 网关配置 | `bun run typecheck`、`bun test --run tests/openai-compatible-config.test.ts tests/engine.test.ts` | `bun test --run` |
 | DI container / bootstrap | `bun run typecheck`、`bun test --run src/core/container/bootstrap.test.ts tests/integration.test.ts` | `bun test --run` |
 

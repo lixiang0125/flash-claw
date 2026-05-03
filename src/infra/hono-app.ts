@@ -35,11 +35,63 @@ interface AppServices {
     killRun(id: string): boolean;
   };
   logger: Logger;
+  apiToken?: string;
+  requireApiToken?: boolean;
 }
 
 export function createHonoApp(services: AppServices): Hono {
-  const { chatEngine, feishuBot, taskScheduler, heartbeatSystem, subAgentSystem, logger } = services;
+  const {
+    chatEngine,
+    feishuBot,
+    taskScheduler,
+    heartbeatSystem,
+    subAgentSystem,
+    logger,
+    apiToken = process.env["FLASH_CLAW_API_TOKEN"]?.trim() ?? "",
+    requireApiToken = process.env["NODE_ENV"] === "production",
+  } = services;
   const app = new Hono();
+
+  const isFeishuWebhookPost = (method: string, path: string): boolean => {
+    if (method !== "POST") return false;
+    return path === "/api/webhooks/feishu" ||
+      path.startsWith("/api/webhooks/feishu/") ||
+      path === "/api/feishu/webhook" ||
+      path.startsWith("/api/feishu/webhook/");
+  };
+
+  const isPublicRoute = (method: string, path: string): boolean => {
+    if (method === "GET" && !path.startsWith("/api/")) {
+      return true;
+    }
+    if (method === "GET" && (path === "/" || path === "/health" || path === "/api/status")) {
+      return true;
+    }
+    return isFeishuWebhookPost(method, path);
+  };
+
+  app.use("*", async (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (isPublicRoute(c.req.method, path)) {
+      return next();
+    }
+
+    if (!apiToken) {
+      if (!requireApiToken) {
+        return next();
+      }
+      return c.json({ error: "API token is required in production" }, 503);
+    }
+
+    const authHeader = c.req.header("authorization") ?? "";
+    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+    const headerToken = c.req.header("x-flash-claw-token")?.trim() ?? "";
+    if (bearerToken !== apiToken && headerToken !== apiToken) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    return next();
+  });
 
   const handleFeishuWebhook = async (body: unknown, connectorId?: string): Promise<Response> => {
     if (!feishuBot.isConfigured(connectorId)) {
@@ -67,6 +119,7 @@ export function createHonoApp(services: AppServices): Hono {
   app.use("/*", serveStatic({ root: "./dist" }));
 
   app.get("/", (c) => c.text("Flash Claw Chat API"));
+  app.get("/health", (c) => c.json({ ok: true, status: "healthy" }));
 
   app.get("/api/status", (c) => {
     const llmConfig = resolveOpenAICompatibleConfig();
@@ -140,7 +193,7 @@ export function createHonoApp(services: AppServices): Hono {
       return c.json({ error: "script name is required" }, 400);
     }
 
-    const result = executeScript(name, script, args || []);
+    const result = await executeScript(name, script, args || []);
     if (!result) {
       return c.json({ error: "Script not found" }, 404);
     }

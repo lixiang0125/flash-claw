@@ -192,6 +192,11 @@ export class SecurityLayer {
       };
     }
 
+    const quoteCheck = this.checkBalancedShellQuotes(command);
+    if (!quoteCheck.allowed) {
+      return quoteCheck;
+    }
+
     const blockedCheck = this.checkBlockedCommands(command);
     if (!blockedCheck.allowed) {
       return blockedCheck;
@@ -230,6 +235,44 @@ export class SecurityLayer {
         continue;
       }
     }
+    return { allowed: true, riskLevel: "none" };
+  }
+
+  /**
+   * shell-quote 对部分未闭合引号会容错解析，执行前需要先做轻量配对检查。
+   */
+  private checkBalancedShellQuotes(command: string): SecurityCheckResult {
+    let singleQuoteOpen = false;
+    let doubleQuoteOpen = false;
+    let backtickOpen = false;
+    let escaped = false;
+
+    for (const char of command) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "'" && !doubleQuoteOpen && !backtickOpen) {
+        singleQuoteOpen = !singleQuoteOpen;
+      } else if (char === "\"" && !singleQuoteOpen && !backtickOpen) {
+        doubleQuoteOpen = !doubleQuoteOpen;
+      } else if (char === "`" && !singleQuoteOpen && !doubleQuoteOpen) {
+        backtickOpen = !backtickOpen;
+      }
+    }
+
+    if (singleQuoteOpen || doubleQuoteOpen || backtickOpen) {
+      return {
+        allowed: false,
+        reason: "Unable to parse command safely: unbalanced shell quotes",
+        riskLevel: "high",
+      };
+    }
+
     return { allowed: true, riskLevel: "none" };
   }
 
@@ -278,8 +321,13 @@ export class SecurityLayer {
       }
 
       return { allowed: true, riskLevel: "none" };
-    } catch {
-      return { allowed: true, riskLevel: "none" };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return {
+        allowed: false,
+        reason: `Unable to parse command safely: ${reason}`,
+        riskLevel: "high",
+      };
     }
   }
 

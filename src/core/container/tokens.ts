@@ -52,21 +52,25 @@ export type { EvolutionStrategy, EvolutionReport } from "../../evolution/types";
  *
  * @interface AppConfig
  * @property {number} port - 服务监听端口号
+ * @property {string} host - 服务绑定地址，默认仅监听本机
  * @property {string} dbPath - SQLite 数据库文件路径
  * @property {string} llmApiKey - LLM 服务的 API 密钥
  * @property {string} llmModel - 使用的 LLM 模型名称
  * @property {string} env - 运行环境：development、production 或 test
  * @property {string} logLevel - 日志输出级别：debug、info、warn 或 error
  * @property {string} workspacePath - 工作区根目录路径
+ * @property {string} apiToken - 受保护 HTTP API 的访问令牌
  */
 export interface AppConfig {
   readonly port: number;
+  readonly host: string;
   readonly dbPath: string;
   readonly llmApiKey: string;
   readonly llmModel: string;
   readonly env: "development" | "production" | "test";
   readonly logLevel: "debug" | "info" | "warn" | "error";
   readonly workspacePath: string;
+  readonly apiToken: string;
 }
 
 /**

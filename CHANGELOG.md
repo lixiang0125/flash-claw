@@ -2,6 +2,17 @@
 
 ## 2026-05-03 (30)
 
+### security: 加固 HTTP API、工具审批与测试外部副作用边界
+
+- 新增 `/health` 健康检查，并将默认服务绑定从外部可访问改为 `HOST=127.0.0.1`；`PORT` 文档同步为代码默认值 `3000`。
+- `src/infra/hono-app.ts` 新增 API token gate：生产环境受保护 API 需要 `FLASH_CLAW_API_TOKEN`，飞书 webhook、`/health`、`/api/status` 保持公开。
+- `ToolExecutor` 开始强制执行 `needsApproval` gate；写文件、bash、browser 等高权限工具默认不执行，只有可信本地环境设置 `FLASH_CLAW_AUTO_APPROVE_TOOLS=true` 才自动放行。
+- ChatEngine 默认只向模型暴露无需审批的工具；自动审批开启后才暴露高权限工具，减少模型误触写入/执行类工具。
+- Shell 命令解析改为 fail-closed，并对未配平 shell 引号做前置拒绝，避免解析器容错导致危险命令绕过。
+- `.agents/skills` 纳入文件边界，Skill 脚本执行统一走读取路径校验；测试环境 bootstrap 跳过真实飞书和心跳外部启动，避免回归测试依赖真实 `.env` / 外部服务。
+- 修复 Skill 脚本 HTTP 执行接口未等待异步执行结果的问题，避免把 pending promise 序列化为空对象。
+- 新增/更新 `tests/hono-app.test.ts`、`tests/tool-executor.test.ts`、`tests/security.test.ts`、`tests/skills.test.ts`、`src/core/container/bootstrap.test.ts` 回归覆盖。
+
 ### docs: 落地单入口 Agent 规则与项目知识库
 
 - 参考 `i18n_ecom_growth_strategy` 的治理方式，将 `AGENTS.md` 收敛为 Flash-Claw 的唯一 Agent 执行契约入口，并要求 `CLAUDE.md` 通过软链指向 `AGENTS.md`，避免多份规则漂移。
