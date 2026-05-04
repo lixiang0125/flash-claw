@@ -144,7 +144,6 @@ export class DockerSandboxManager {
 
   async exec(sessionId: string, command: string, timeoutMs = 30_000): Promise<ExecResult> {
     const instance = await this.acquire(sessionId);
-    const startTime = Date.now();
 
     try {
       return await this.execInContainer(instance.containerId, command, timeoutMs);
@@ -361,21 +360,7 @@ export class DockerSandboxManager {
   }
 
   private createTarStream(filePath: string, content: string): NodeJS.ReadableStream {
-    const { Buffer } = require("buffer");
     const tar = require("tar");
-
-    const chunks: Buffer[] = [];
-    const readable = new (require("stream").Readable)({
-      read() {
-        // Will be populated by tar stream
-      },
-    });
-
-    const entry = {
-      cwd: "/workspace",
-      file: filePath,
-      content: Buffer.from(content, "utf-8"),
-    };
 
     const pack = tar.pack();
     pack.entry({ name: filePath }, content);

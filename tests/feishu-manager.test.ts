@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { FeishuBot } from "../src/integrations/feishu";
 import { FeishuBotManager, readFeishuManagerConfigFromEnv } from "../src/integrations/feishu-manager";
 

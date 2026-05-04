@@ -10,7 +10,7 @@ export interface LLMService {
 
 export function createLLMService(): LLMService {
   return {
-    async generateText(prompt: string, options?: LLMOptions): Promise<string> {
+    async generateText(prompt: string, _options?: LLMOptions): Promise<string> {
       return prompt;
     },
   };

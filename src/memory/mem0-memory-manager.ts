@@ -14,7 +14,7 @@
  */
 import type { Memory } from "mem0ai/oss";
 import type { Logger } from "../core/container/tokens";
-import type { WorkingMemory, ConversationMessage } from "./working-memory";
+import type { WorkingMemory } from "./working-memory";
 import type { ShortTermMemory } from "./short-term-memory";
 import type { MarkdownMemory } from "./markdown-memory";
 import type { UserProfileService, UserProfile } from "./user-profile";
@@ -241,8 +241,6 @@ export class Mem0MemoryManager implements IMemoryManager {
   private shortTermMemory: ShortTermMemory;
   /** mem0 向量记忆实例（第四级）。 */
   private mem0: Memory;
-  /** Markdown 文件记忆实例（第三级），可为 null 表示未启用。 */
-  private markdownMemory: MarkdownMemory | null;
   /** 用户画像服务实例。 */
   private userProfile: UserProfileService;
 
@@ -262,7 +260,7 @@ export class Mem0MemoryManager implements IMemoryManager {
     workingMemory: WorkingMemory,
     shortTermMemory: ShortTermMemory,
     mem0: Memory,
-    markdownMemory: MarkdownMemory | null,
+    _markdownMemory: MarkdownMemory | null,
     userProfile: UserProfileService,
     config?: Partial<Mem0MemoryManagerConfig>,
   ) {
@@ -270,7 +268,6 @@ export class Mem0MemoryManager implements IMemoryManager {
     this.workingMemory = workingMemory;
     this.shortTermMemory = shortTermMemory;
     this.mem0 = mem0;
-    this.markdownMemory = markdownMemory;
     this.userProfile = userProfile;
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
@@ -564,7 +561,7 @@ export class Mem0MemoryManager implements IMemoryManager {
    * @param maxAge - 可选的最大保留时间（毫秒）
    * @returns 被清理的记录数量
    */
-  async cleanup(maxAge?: number): Promise<number> {
+  async cleanup(): Promise<number> {
     return this.shortTermMemory.cleanup();
   }
 

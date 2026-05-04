@@ -13,16 +13,6 @@ export interface ErrorContext {
 }
 
 export class ErrorSanitizer {
-  private static internalErrors = new Set<string>([
-    "ENOENT",
-    "EACCES",
-    "EPERM",
-    "ECONNREFUSED",
-    "ETIMEDOUT",
-    "ENOTFOUND",
-    "VALIDATION_ERROR",
-  ]);
-
   static sanitize(error: unknown, context?: ErrorContext): string {
     const errorId = generateErrorId();
 

@@ -126,7 +126,6 @@ export class WorkingMemory {
     if (!this.config.memoryFlushEnabled) return false;
     if (!this.flushCallback) return false;
 
-    const currentCompaction = this.compactionCount.get(sessionId) ?? 0;
     const hasFlushed = this.hasFlushedInCompaction.get(sessionId) ?? false;
 
     const threshold = this.config.maxTokens - this.config.reserveTokensFloor - this.config.memoryFlushSoftThreshold;

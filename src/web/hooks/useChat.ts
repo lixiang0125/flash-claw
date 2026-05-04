@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import type { Message, ToolResult } from '../types';
+import type { Message } from '../types';
 import { sendMessage, clearSession } from '../api/chat';
 
 /**

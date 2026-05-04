@@ -3,7 +3,7 @@ import type {
   ChatCompletion,
   ChatCompletionCreateParamsNonStreaming,
 } from "openai/resources/chat/completions/completions";
-import { listSkills, type Skill } from "../skills";
+import type { Skill } from "../skills";
 import { type IMemoryManager } from "../memory";
 import { parseTaskWithLLM, rewriteMemoryQuery } from "./llm-parser";
 import { cronToHumanReadable } from "./parsers";

@@ -126,10 +126,6 @@ export function readFeishuManagerConfigFromEnv(
   };
 }
 
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export class FeishuBotManager {
   private readonly bots = new Map<string, FeishuBot>();
   private readonly defaultBotId: string | null;

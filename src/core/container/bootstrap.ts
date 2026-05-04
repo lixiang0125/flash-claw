@@ -1,6 +1,5 @@
 import { Container } from "./container";
 import { Lifecycle } from "./types";
-import type { ServiceResolver } from "./types";
 import {
   CONFIG,
   LOGGER,
@@ -34,15 +33,6 @@ import {
   type SandboxManager as ISandboxManagerToken,
   type ToolRegistry as IToolRegistry,
   type ToolExecutor as IToolExecutor,
-  type IMemoryManager,
-  type IPromptBuilder,
-  type IContextBudget,
-  type IChatEngine,
-  type IFeishuBot,
-  type ITaskScheduler,
-  type IHeartbeatSystem,
-  type ISubAgentSystem,
-  type HonoApp,
 } from "./tokens";
 import { TypedEventBus } from "./event-bus";
 import { createSandboxManager } from "../../tools/sandbox";
@@ -64,13 +54,9 @@ import { FeishuBotManager } from "../../integrations/feishu-manager";
 import { TaskScheduler } from "../../tasks";
 import { HeartbeatSystem } from "../../heartbeat";
 import { SubAgentSystem } from "../../subagents";
-import { setSubAgentSystem } from "../../tools/index";
-import { Hono } from "hono";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import type { ChatRequest } from "../../chat/types";
 import pino from "pino";
 import { WorkingMemory } from "../../memory/working-memory";
-import type { ConversationMessage } from "../../memory/working-memory";
 import { ShortTermMemory, type DatabaseService } from "../../memory/short-term-memory";
 import { UserProfileService } from "../../memory/user-profile";
 import { Mem0MemoryManager } from "../../memory/mem0-memory-manager";
@@ -81,7 +67,6 @@ import { EvolutionEngine } from "../../evolution";
 import { DailySummarizer } from "../../memory/daily-summarizer";
 import { SecurityLayer } from "../../security/security-layer";
 import { PromptBuilder } from "../../agent/prompt-builder";
-import { type IMemoryManager as PromptBuilderMemoryManager } from "../../memory/memory-manager";
 import { createHonoApp } from "../../infra/hono-app";
 
 export {
@@ -331,7 +316,6 @@ export function createContainer(): Container {
     lifecycle: Lifecycle.Singleton,
     factory: (resolver) => {
       const logger = resolver.resolve(LOGGER);
-      const config = resolver.resolve(CONFIG);
       const markdownMemory = resolver.resolve(MARKDOWN_MEMORY);
 
       const workingMemory = new WorkingMemory({ maxMessages: 50, maxTokens: 30000 });
@@ -459,10 +443,8 @@ export function createContainer(): Container {
     factory: (resolver) => {
       const logger = resolver.resolve(LOGGER);
       const contextBudget = resolver.resolve(CONTEXT_BUDGET);
-      const memoryManager = resolver.resolve(MEMORY_MANAGER);
       return new PromptBuilder(
         contextBudget as ContextBudget,
-        memoryManager as PromptBuilderMemoryManager,
         logger,
       );
     },
@@ -517,7 +499,7 @@ export function createContainer(): Container {
         logger.debug(`[TOOL_RESULT] ${name}`, { success: execResult.success, error: execResult.error });
         return { result: execResult.output, error: execResult.error || undefined };
       });
-      engine.setMemoryManager(memoryManager as PromptBuilderMemoryManager);
+      engine.setMemoryManager(memoryManager);
 
       // Wire WorkingMemory as single source of truth for session history
       const workingMemory = resolver.resolve(WORKING_MEMORY);
@@ -667,7 +649,6 @@ export async function bootstrap(): Promise<Container> {
     // 注入子代理系统的依赖：ChatEngine
     const sa = container.resolve(SUB_AGENT_SYSTEM);
     sa.setChatEngine(ce);
-    setSubAgentSystem(sa);
     tsLogger.info("SubAgentSystem DI wired");
 
     // 注入自进化引擎到 ChatEngine

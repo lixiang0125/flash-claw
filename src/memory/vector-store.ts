@@ -197,7 +197,7 @@ export class VectorStore implements IVectorStore {
       .sort((a, b) => b.score - a.score);
 
     if (this.config.enableMMR && mergedResults.length > 1) {
-      mergedResults = this.mmrRerank(mergedResults, limit, queryText);
+      mergedResults = this.mmrRerank(mergedResults, limit);
     }
 
     return mergedResults.slice(0, limit);
@@ -206,7 +206,6 @@ export class VectorStore implements IVectorStore {
   private mmrRerank(
     results: VectorSearchResult[],
     limit: number,
-    query: string,
   ): VectorSearchResult[] {
     if (results.length <= limit) return results;
 

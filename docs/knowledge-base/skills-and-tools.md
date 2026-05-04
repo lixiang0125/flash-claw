@@ -46,7 +46,6 @@ HTTP API：
 
 AI 可用工具定义在 `src/tools/`：
 
-- `src/tools/index.ts`：工具注册入口。
 - `src/tools/tool-registry.ts`：工具注册表。
 - `src/tools/tool-executor.ts`：工具执行器。
 - `src/tools/builtin/`：内置工具实现。

@@ -1,5 +1,5 @@
 import { resolve, relative, isAbsolute } from "path";
-import { realpathSync, lstatSync, existsSync } from "fs";
+import { realpathSync } from "fs";
 
 const SENSITIVE_PATTERNS = [/\.env$/, /\.git/, /node_modules/, /package\.json$/];
 
@@ -14,17 +14,17 @@ function getAllowedRoots(): string[] {
 
 export function validateReadPath(targetPath: string): string {
   const absPath = resolve(process.cwd(), targetPath);
-  validatePath(absPath, false);
+  validatePath(absPath);
   return absPath;
 }
 
 export function validateWritePath(targetPath: string): string {
   const absPath = resolve(process.cwd(), targetPath);
-  validatePath(absPath, true);
+  validatePath(absPath);
   return absPath;
 }
 
-function validatePath(absPath: string, isWrite: boolean): void {
+function validatePath(absPath: string): void {
   const allowedRoots = getAllowedRoots();
   const isAllowed = allowedRoots.some((root) => {
     const rel = relative(root, absPath);

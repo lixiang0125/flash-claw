@@ -492,29 +492,4 @@ export class SecurityLayer {
     return path.replace(/^\.\//,  "").replace(/\/+/g, "/");
   }
 
-  /**
-   * 检查路径是否匹配指定的通配符模式。
-   * 支持通配符全匹配、扩展名匹配和通用通配符匹配。
-   *
-   * @private
-   * @param {string} path - 需要匹配的路径
-   * @param {string} pattern - 通配符模式
-   * @returns {boolean} 路径是否匹配该模式
-   */
-  private matchPattern(path: string, pattern: string): boolean {
-    if (pattern === "**/*") return true;
-
-    if (pattern.startsWith("*.") && path.endsWith(pattern.slice(1))) {
-      return true;
-    }
-
-    if (pattern.includes("*")) {
-      const regex = new RegExp(
-        "^" + pattern.replace(/\*/g, ".*").replace(/\?/g, ".") + "$"
-      );
-      return regex.test(path);
-    }
-
-    return path === pattern || path.startsWith(pattern + "/");
-  }
 }

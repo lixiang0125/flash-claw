@@ -145,17 +145,6 @@ export class SubAgentSystem {
 
   private announceToParent(run: SubAgentRun): void {
     if (!this.chatEngineAPI) return;
-    const parentHistory = this.chatEngineAPI.getHistoryMessages(run.parentSessionId);
-    
-    const statusText = run.status === "completed" ? "success" : run.status;
-    const announceMessage = `## Sub-agent Result: ${run.label || run.id}
-
-**Status:** ${statusText}
-**Result:** ${run.result || "(not available)"}
-**Notes:** ${run.error || "None"}
-**Runtime:** ${run.runtime || "N/A"}
-**Session:** ${run.sessionId}`;
-
     console.log(`[SubAgent] Announcing result to parent ${run.parentSessionId}:`, run.status);
   }
 

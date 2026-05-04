@@ -1,4 +1,4 @@
-import { WorkingMemory, type ConversationMessage } from "./working-memory";
+import { WorkingMemory } from "./working-memory";
 import { ShortTermMemory } from "./short-term-memory";
 import { LongTermMemory, type MemoryEntry, type MemoryQuery, type MemorySearchResult } from "./long-term-memory";
 import { UserProfileService, type UserProfile } from "./user-profile";
@@ -118,7 +118,7 @@ export class MemoryManager implements IMemoryManager {
     });
 
     await this.tryFlushIfNeeded(sessionId);
-    await this.saveToMarkdownIfNeeded(userText, response, sessionId);
+    await this.saveToMarkdownIfNeeded(userText, sessionId);
 
     this.shortTermMemory.upsertSession(sessionId, userId, msg.platform);
     this.shortTermMemory.saveMessage(sessionId, {
@@ -148,7 +148,7 @@ export class MemoryManager implements IMemoryManager {
     }
   }
 
-  private async saveToMarkdownIfNeeded(userText: string, response: string, sessionId: string): Promise<void> {
+  private async saveToMarkdownIfNeeded(userText: string, sessionId: string): Promise<void> {
     // OpenClaw 模式：每次对话都记录到 daily log
     // 这模仿了 OpenClaw 的 memory/YYYY-MM-DD.md 设计
     const workspacePath = process.env["WORKSPACE_PATH"] || "./data/workspace";
@@ -217,7 +217,7 @@ export class MemoryManager implements IMemoryManager {
     return this.userProfileService.updateProfile(userId, updates);
   }
 
-  async cleanup(maxAge?: number): Promise<number> {
+  async cleanup(): Promise<number> {
     return this.shortTermMemory.cleanup();
   }
 }

@@ -728,6 +728,9 @@ bun run test:run
 
 # 类型检查
 bun run typecheck
+
+# 额外死代码检查
+bun run typecheck -- --noUnusedLocals true --noUnusedParameters true
 ```
 
 ---
@@ -764,18 +767,9 @@ flash-claw/
 │   │   └── embedding/                #   嵌入服务
 │   │
 │   ├── tools/                        # 工具系统
-│   │   ├── bash.ts                   #   Shell 命令执行
-│   │   ├── browser.ts                #   本地浏览器 CDP 接管
-│   │   ├── read-file.ts              #   文件读取
-│   │   ├── write-file.ts             #   文件写入
-│   │   ├── edit-file.ts              #   文件编辑（查找替换）
-│   │   ├── glob.ts                   #   文件模式匹配
-│   │   ├── grep.ts                   #   内容搜索
-│   │   ├── web-search.ts             #   互联网搜索（Tavily）
-│   │   ├── web-fetch.ts              #   网页抓取（Playwright + Readability）
+│   │   ├── builtin/                  #   内置工具实现
 │   │   ├── tool-registry.ts          #   工具注册表
 │   │   ├── tool-executor.ts          #   工具执行器（含安全层）
-│   │   ├── legacy-adapter.ts         #   旧工具适配器
 │   │   └── sandbox/                  #   Docker 沙箱支持
 │   │
 │   ├── evolution/                    # 自进化系统

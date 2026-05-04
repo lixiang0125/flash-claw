@@ -1,7 +1,6 @@
 import type { ConversationMessage } from "../memory/working-memory";
 import type { MemoryEntry } from "../memory/long-term-memory";
 import type { ContextBudget } from "../memory/context-budget";
-import type { IMemoryManager } from "../memory/memory-manager";
 import type { Logger } from "../core/container/tokens";
 
 export interface AgentContext {
@@ -25,16 +24,13 @@ export interface IPromptBuilder {
 
 export class PromptBuilder implements IPromptBuilder {
   private contextBudget: ContextBudget;
-  private memoryManager: IMemoryManager;
   private logger: Logger;
 
   constructor(
     contextBudget: ContextBudget,
-    memoryManager: IMemoryManager,
     logger: Logger,
   ) {
     this.contextBudget = contextBudget;
-    this.memoryManager = memoryManager;
     this.logger = logger;
   }
 
@@ -49,10 +45,7 @@ export class PromptBuilder implements IPromptBuilder {
 
     let systemContent = systemPrompt;
 
-    const skillContent = this.buildSkillSection(
-      context.activeSkills,
-      allocations.skills ?? 0,
-    );
+    const skillContent = this.buildSkillSection(context.activeSkills);
     const skillTokens = this.contextBudget.estimateTokens(skillContent);
     actualUsage.skills = skillTokens;
     if (skillContent) {
@@ -132,7 +125,7 @@ export class PromptBuilder implements IPromptBuilder {
       .join("\n");
   }
 
-  private buildSkillSection(skills: unknown[], maxTokens: number): string {
+  private buildSkillSection(skills: unknown[]): string {
     if (!skills || skills.length === 0) return "";
     return "";
   }

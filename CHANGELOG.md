@@ -2,6 +2,12 @@
 
 ## 2026-05-03 (30)
 
+### cleanup: 删除编译器可证明的无用代码
+
+- 清理未使用 import、未读取字段/局部变量、空的旧实现残留和未消费的子代理结果公告字符串，删除已无引用的 `src/tools/index.ts` 旧入口。
+- `PromptBuilder` 构造参数收敛到实际使用的 `ContextBudget` 与 `Logger`；`DockerSandboxManager` tar helper 删除旧实现临时变量。
+- 使用 `tsc --noUnusedLocals --noUnusedParameters` 作为额外静态检查，当前未使用代码诊断清零。
+
 ### security: 加固 HTTP API、工具审批与测试外部副作用边界
 
 - 新增 `/health` 健康检查，并将默认服务绑定从外部可访问改为 `HOST=127.0.0.1`；`PORT` 文档同步为代码默认值 `3000`。

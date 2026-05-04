@@ -80,7 +80,6 @@ export const editFileTool: FlashClawToolDefinition<typeof EditFileInput, EditFil
    */
   execute: async (input: { path: string; oldString: string; newString: string; replaceAll?: boolean }, context: ToolExecutionContext): Promise<EditFileOutput> => {
     const fs = await import("fs");
-    const path = await import("path");
 
     const fullPath = input.path.startsWith("/")
       ? input.path
