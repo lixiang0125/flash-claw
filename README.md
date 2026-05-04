@@ -1,592 +1,190 @@
-# Flash-Claw ⚡🦞
+# Flash-Claw
 
-[![CI](https://github.com/anthropics/flash-claw/actions/workflows/ci.yml/badge.svg)](https://github.com/anthropics/flash-claw/actions/workflows/ci.yml)
+[![CI](https://github.com/lixiang0125/flash-claw/actions/workflows/ci.yml/badge.svg)](https://github.com/lixiang0125/flash-claw/actions/workflows/ci.yml)
 [![Bun](https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun)](https://bun.sh)
 [![Hono](https://img.shields.io/badge/framework-Hono-E36002?logo=hono)](https://hono.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> 基于 Bun + Hono + OpenAI SDK 的 AI 智能体引擎 —— 内置四级记忆、自进化、任务调度、安全沙箱与飞书集成。
+Flash-Claw 是一个基于 Bun、Hono、React 和 OpenAI-compatible 模型服务的本地 AI 智能体引擎。它提供对话引擎、四级记忆、工具调用、Skill、任务调度、飞书单/多机器人接入、心跳和基础安全边界。
 
----
+## 当前能力
+
+- 对话引擎：支持普通对话、流式响应、多步工具调用、任务意图解析和记忆检索。
+- 记忆系统：工作记忆、短期记忆、mem0 向量记忆和 Markdown 记忆。
+- 工具系统：内置文件、shell、搜索、网页抓取和本地浏览器 CDP 工具，并通过审批 gate 控制高风险工具。
+- Skill 系统：兼容 Claude Code Agent Skills 标准，从 `.flashclaw/skills/`、`.agents/skills/` 和父目录同名路径动态发现。
+- 飞书集成：保留 legacy 单机器人配置，同时支持 `FEISHU_BOTS` 多机器人管理器、路由分发、会话/记忆隔离和流式卡片。
+- 任务与心跳：支持 cron、固定间隔、一次性任务和结构化飞书通知目标。
+- Web 前端：React 19 + Vite 单页聊天界面。
+- 安全边界：本机默认监听、API token gate、路径边界、命令过滤、SSRF 防护和工具审批。
 
 ## 技术栈
 
-| 层级 | 技术选型 | 说明 |
-|------|----------|------|
-| **运行时** | [Bun](https://bun.sh) | 高性能 JavaScript/TypeScript 运行时 |
-| **Web 框架** | [Hono](https://hono.dev) | 超轻量 Web 框架，兼容多运行时 |
-| **AI 推理** | OpenAI SDK | 兼容 OpenAI / DashScope 等 OpenAI-compatible 模型服务 |
-| **前端** | React 19 + Vite | 单页应用，Vite 构建 |
-| **数据库** | SQLite (`bun:sqlite`) | 内嵌数据库，零依赖部署 |
-| **向量记忆** | [mem0ai](https://github.com/mem0ai/mem0) v2.3.0 OSS | 本地向量搜索，`better-sqlite3` → `bun:sqlite` shim |
-| **Embedding** | `@xenova/transformers` | 本地推理，模型 `Xenova/multilingual-e5-small`（384 维） |
-| **DI 容器** | 自研 IoC 容器 | Singleton / Transient / Scoped 三种生命周期 |
-
----
-
-## 功能特性概览
-
-- **对话引擎** — 多步工具循环、记忆检索、任务调度意图解析，一次对话即可完成复杂任务
-- **四级记忆系统** — T0 工作记忆 → T1 短期记忆 → T2 向量记忆 → T3 Markdown 记忆，兼顾速度与持久化
-- **自进化系统** — 对话反馈分析 + 进化策略规划，智能体可从交互中自主学习与改进
-- **9 个内置工具** — bash、文件读写编辑、glob/grep 搜索、Web 搜索抓取、本地浏览器 CDP 接管
-- **Skill 系统** — 兼容 Claude Code Agent Skills 标准，内置 10 个 Skill
-- **任务调度** — cron / interval / one-time 三种模式，LLM 智能解析多语言任务意图
-- **飞书集成** — 单机器人兼容 + 多机器人管理器，Webhook / WebSocket 双模式，流式卡片输出 + 耗时计时
-- **性能优化** — Embedding LRU 缓存、Memory 超时保护、启动预热、全链路计时埋点
-- **安全层** — 路径边界检查、命令安全过滤、速率限制、SSRF 防护、审计日志
-- **DI 容器** — 自研 IoC 容器，24 个服务 Token，循环依赖检测与有序销毁
-- **心跳系统** — 定时健康检查与自动恢复
-
----
-
-## Agent 与文档治理
-
-Flash-Claw 采用单入口 Agent 规则方案：
-
-- `AGENTS.md` 是 Codex、Claude 和其他 AI agent 的统一执行契约入口。
-- `CLAUDE.md` 通过软链指向 `AGENTS.md`，避免两份规则并行维护后漂移。
-- `docs/README.md` 维护规则库与知识库索引。
-- `docs/rules/development-guide.md` 维护开发规范、验证要求、文档同步和提交流程。
-- `docs/knowledge-base/` 维护项目概览、飞书接入、Skill 与工具系统等长期知识。
-- `docs/test/verification-matrix.md` 维护不同变更类型对应的验证命令。
-
-开始修改代码前先读 `AGENTS.md`，再按任务范围阅读 `docs/README.md` 中列出的对应文档。涉及飞书、多 channel 记忆、工具安全或 DI 边界时，必须同步更新对应知识库。
-
----
+| 层级 | 技术 |
+| --- | --- |
+| 运行时 | Bun |
+| HTTP | Hono |
+| 前端 | React 19 + Vite |
+| LLM | OpenAI SDK，兼容 OpenAI / DashScope / 其他 OpenAI-compatible 网关 |
+| 数据 | SQLite、JSON 文件 |
+| 记忆 | mem0ai OSS、`@xenova/transformers` 本地 embedding |
+| 测试 | Bun test、TypeScript `tsc --noEmit` |
 
 ## 快速开始
 
-### 前置要求
+### 依赖
 
-- [Bun](https://bun.sh) >= 1.0
-- Node.js >= 18（仅 Vite 构建前端时需要）
+- Bun >= 1.0
+- Node.js >= 18，仅在 Vite / Playwright 辅助能力需要 Node 侧生态时使用
 
 ### 安装
 
 ```bash
-# 克隆仓库
-git clone https://github.com/anthropics/flash-claw.git
+git clone git@github.com:lixiang0125/flash-claw.git
 cd flash-claw
-
-# 安装依赖
 bun install
 ```
 
 ### 配置
 
-复制环境变量模板并填写必要配置：
-
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，至少配置以下变量：
+最小可用配置：
 
 ```bash
-# AI 推理（必须，任选一种 OpenAI-compatible 服务）
 OPENAI_API_KEY=sk-xxxxx
+OPENAI_BASE_URL=https://api.openai.com/v1
 MODEL=gpt-4o-mini
+```
 
-# 可选：如果接 OpenAI 官方，可不填 OPENAI_BASE_URL
-# OPENAI_BASE_URL=https://api.openai.com/v1
+DashScope 或其他 OpenAI-compatible 网关示例：
 
-# 可选：如果接 DashScope / 其他兼容服务，改成对应端点
-# OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-
-# 可选
-TAVILY_API_KEY=tvly-xxxxx           # Web 搜索（Tavily）
-
-# 可选：本地浏览器 CDP 接管地址
-# BROWSER_CDP_URL=http://127.0.0.1:9222
-FEISHU_APP_ID=cli_xxxxx             # 飞书应用 ID
-FEISHU_APP_SECRET=xxxxx             # 飞书应用 Secret
+```bash
+OPENAI_API_KEY=your-compatible-api-key
+OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MODEL=qwen-plus
 ```
 
 ### 运行
 
 ```bash
-# 开发模式（后端 + 前端热重载）
+# 后端 + 前端静态资源服务，开发时由 Bun watch 重启
 bun run dev
 
-# 仅构建前端
+# 构建 Web 前端
 bun run build:web
 
-# 生产模式
+# 启动生产入口
 bun run start
 ```
+
+默认监听 `127.0.0.1:3000`。确需暴露给外部网络时再设置 `HOST=0.0.0.0`，并为受保护 API 配置 `FLASH_CLAW_API_TOKEN`。
 
 ### 验证
 
 ```bash
-# 健康检查
-curl http://localhost:3000/health
+curl http://127.0.0.1:3000/health
 
-# 发送对话
-curl -X POST http://localhost:3000/api/chat \
+curl -X POST http://127.0.0.1:3000/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "你好，介绍一下你自己"}'
+  -d '{"message":"你好，介绍一下你自己","sessionId":"default","userId":"local:user"}'
 ```
 
-Web 页面顶部会显示后端连通性、当前模型、API Key 配置状态和当前生效端点，方便快速确认前后端以及模型配置是否已生效。
-
-对于第三方 OpenAI-compatible 网关，主对话接口现在会自动重试短暂的网络抖动和 5xx 错误，降低偶发失败直接暴露给 Web 页的概率。
-
-Web 聊天界面在 PC 端使用固定容器宽度，并为思考中的气泡保留独立边距，减少布局跳动。
-
-当前 Web 聊天区还额外统一了消息列表和输入区留白，PC 端阅读宽度更稳定。
-
-消息气泡宽度也做了进一步约束，长文本在 PC 端更接近稳定阅读列宽。
-
----
-
-## 架构设计
-
-### DI 容器
-
-Flash-Claw 使用自研的 IoC（控制反转）容器管理所有服务的生命周期与依赖关系。
-
-#### 三种生命周期
-
-| 生命周期 | 行为 | 适用场景 |
-|----------|------|----------|
-| **Singleton** | 全局唯一实例，首次解析时创建 | 数据库、配置、日志等基础设施 |
-| **Transient** | 每次解析都创建新实例 | 无状态工具、临时处理器 |
-| **Scoped** | 在同一作用域内共享实例 | 请求级别的上下文 |
-
-#### 服务注册表（24 个 Token）
-
-```
-CONFIG, LOGGER, EVENT_BUS, DATABASE,
-SANDBOX_MANAGER, TOOL_REGISTRY, TOOL_EXECUTOR,
-WORKING_MEMORY, MARKDOWN_MEMORY, SHORT_TERM_MEMORY,
-USER_PROFILE, MEMORY_MANAGER, CONTEXT_BUDGET,
-PROMPT_BUILDER, CHAT_ENGINE,
-FEISHU_BOT, TASK_SCHEDULER, HEARTBEAT_SYSTEM,
-SUB_AGENT_SYSTEM, EVOLUTION_ENGINE, HTTP_SERVER
-```
-
-> 另有 `EMBEDDING_SERVICE`、`VECTOR_STORE`、`LONG_TERM_MEMORY`、`LLM_SERVICE`、`AGENT_CORE` 作为 Token 定义，由其他服务内部使用。
-
-#### 核心特性
-
-- **循环依赖检测** — 注册阶段即可发现循环引用
-- **有序销毁** — 按依赖拓扑逆序执行 `dispose()`，确保资源安全释放
-- **类型安全** — 基于 `ServiceToken<T>` 泛型，解析结果自动推断类型
-
-```typescript
-// 定义 Token
-const CHAT_ENGINE = new ServiceToken<IChatEngine>('ChatEngine');
-
-// 注册服务
-container.registerSingleton(CHAT_ENGINE, ChatEngine, [
-  TOOL_EXECUTOR, MEMORY_MANAGER, PROMPT_BUILDER, TASK_SCHEDULER
-]);
-
-// 解析服务（类型自动推断为 IChatEngine）
-const engine = container.resolve(CHAT_ENGINE);
-```
-
----
-
-### 对话引擎
-
-对话引擎（`ChatEngine`）是 Flash-Claw 的核心，负责编排整个对话流程：
-
-```
-用户输入
-  │
-  ▼
-意图解析（任务调度 / 普通对话）
-  │
-  ├─ 任务意图 → LLM 智能解析 → 创建定时任务
-  │
-  └─ 对话意图 → 记忆检索 → 提示词构建 → LLM 推理
-                                              │
-                                              ▼
-                                        工具调用循环
-                                         （多步执行）
-                                              │
-                                              ▼
-                                        记忆写入 + 响应
-```
-
-#### 关键能力
-
-- **多步工具循环** — 单次对话可连续调用多个工具，自动处理工具结果并继续推理
-- **记忆检索** — 自动从四级记忆中检索相关上下文，注入提示词
-- **任务调度意图解析** — 识别「每天早上 8 点提醒我...」等自然语言，自动创建定时任务
-- **LLM 智能任务解析** — 使用 LLM 解析复杂任务意图，支持多语言
-- **记忆查询重写** — LLM 自动优化检索查询，提高记忆召回质量
-- **Embedding 向量缓存** — LRU 256 缓存避免重复 ONNX 推理（500ms→0ms），启动时后台预热模型
-- **Memory 超时保护** — 800ms 阈值，超时跳过记忆检索防止拖慢响应
-- **全链路计时埋点** — chatStream / handleMessageStreaming 分阶段计时日志，便于持续优化
-
----
-
-### 四级记忆系统
-
-Flash-Claw 实现了从易失到持久的四级记忆体系，每一级服务不同的时间尺度与使用场景。
-
-#### 记忆层级总览
-
-| 层级 | 名称 | 存储介质 | 生命周期 | 延迟 | 典型用途 |
-|------|------|----------|----------|------|----------|
-| **T0** | 工作记忆 | 内存 | 会话级（进程退出即丢失） | < 1ms | 当前对话上下文、工具调用状态 |
-| **T1** | 短期记忆 | SQLite | 30 分钟自动过期 | ~ 1ms | 近期对话摘要、临时事实 |
-| **T2** | 向量记忆 | SQLite 向量库 (mem0) | 永久 | ~ 10ms | 用户偏好、长期知识、语义搜索 |
-| **T3** | Markdown 记忆 | 文件系统 | 永久 | ~ 5ms | 结构化笔记、项目文档、知识库 |
-
-#### T0 工作记忆（Working Memory）
-
-- 纯内存存储，零序列化开销
-- 维护当前会话的完整对话历史
-- 工具调用的中间状态暂存
-- 进程重启后自动清空
-
-#### T1 短期记忆（Short-Term Memory）
-
-- 基于 SQLite 的 KV 存储
-- 每条记录带 TTL，默认 30 分钟过期
-- 后台定时清理过期数据
-- 用于缓存近期对话的关键信息
-
-#### T2 向量记忆（mem0 Memory）
-
-- 基于 mem0ai v2.3.0 OSS 版本
-- 使用 `bun:sqlite` shim 替代 `better-sqlite3`，无需原生编译
-- Embedding 模型：`Xenova/multilingual-e5-small`（384 维，本地推理）
-- 支持混合搜索（向量相似度 + 关键词匹配）
-- MMR（最大边际相关性）重排序，减少结果冗余
-- 用户画像自动提取与更新
-
-#### T3 Markdown 记忆（Markdown Memory）
-
-- 以 Markdown 文件存储结构化知识
-- 支持目录层级组织
-- 文件级别的读写操作
-- 适合存储项目文档、技术笔记等长文本
-
-#### 上下文预算管理
-
-`ContextBudget` 组件根据模型的上下文窗口大小，动态分配各级记忆的 Token 预算：
-
-```typescript
-// 预算分配示例
-{
-  systemPrompt: 2000,    // 系统提示词
-  workingMemory: 4000,   // T0 工作记忆
-  shortTermMemory: 2000, // T1 短期记忆
-  longTermMemory: 3000,  // T2 向量记忆
-  tools: 1000,           // 工具定义
-  userMessage: 4000      // 用户消息
-}
-```
-
-#### 数据目录
-
-```
-data/
-├── flash-claw.db          # SQLite 主数据库（T1 短期记忆 + 任务调度）
-├── mem0/                  # T2 向量记忆数据
-│   └── vectors.db         # 向量索引
-├── memory/                # T3 Markdown 记忆
-│   ├── notes/
-│   └── profiles/
-└── models/                # 本地 Embedding 模型缓存
-    └── Xenova/
-        └── multilingual-e5-small/
-```
-
----
-
-### 自进化系统
-
-自进化系统（Evolution System）是 Flash-Claw 的独特能力——智能体可以从每一次对话交互中学习，自主改进自身行为。
-
-#### 工作原理
-
-```
-对话完成
-  │
-  ▼
-反馈分析器（Feedback Analyzer）
-  │  ├─ 规则引擎：模式匹配、关键词检测
-  │  └─ LLM 引擎：深度语义分析用户满意度
-  │
-  ▼
-反馈信号（正向 / 负向 / 中性）
-  │
-  ▼
-策略规划器（Strategy Planner）
-  │  ├─ 分析反馈趋势
-  │  ├─ 识别薄弱环节
-  │  └─ 生成改进策略
-  │
-  ▼
-进化执行
-  ├─ 调整提示词策略
-  ├─ 优化工具选择偏好
-  └─ 更新记忆检索权重
-```
-
-#### 核心组件
-
-| 组件 | 文件 | 职责 |
-|------|------|------|
-| **进化引擎** | `evolution-engine.ts` | 协调整个进化流程，管理进化周期 |
-| **反馈分析器** | `feedback-analyzer.ts` | 双引擎分析（规则 + LLM），从对话中提取反馈信号 |
-| **策略规划器** | `strategy-planner.ts` | 基于反馈趋势规划进化策略，生成可执行的改进方案 |
-
-#### 反馈分析双引擎
-
-**规则引擎**：基于预定义模式快速检测明确的反馈信号
-
-- 关键词匹配（如「谢谢」→ 正向，「不对」→ 负向）
-- 对话模式识别（如重复提问 → 理解不足）
-- 工具调用成功率统计
-
-**LLM 引擎**：深度分析对话语义，捕捉隐含的用户满意度
-
-- 上下文理解用户意图是否被满足
-- 分析回答质量与用户期望的差距
-- 提取可改进的具体方向
-
-#### 进化策略示例
-
-```typescript
-// 策略规划器可能生成的改进方案
-{
-  type: 'prompt_optimization',
-  target: 'code_generation',
-  action: '增加代码示例中的注释密度',
-  confidence: 0.85,
-  evidence: '最近 20 次代码生成对话中，用户追问代码含义的比例达 40%'
-}
-```
-
----
-
-### 工具系统
-
-Flash-Claw 提供 9 个内置工具，覆盖文件操作、代码执行、信息检索与本地浏览器接管：
-
-| 工具 | 函数名 | 描述 | 安全等级 |
-|------|--------|------|----------|
-| **Bash** | `bash` | 执行 shell 命令 | 高风险（沙箱可选） |
-| **读文件** | `read_file` | 读取指定路径的文件内容 | 低风险 |
-| **写文件** | `write_file` | 创建或覆盖写入文件 | 中风险 |
-| **编辑文件** | `edit_file` | 基于查找替换的精确编辑 | 中风险 |
-| **Glob** | `glob` | 文件模式匹配搜索 | 低风险 |
-| **Grep** | `grep` | 文件内容正则搜索 | 低风险 |
-| **Web 搜索** | `web_search` | 互联网搜索（Tavily API） | 低风险 |
-| **Web 抓取** | `web_fetch` | 网页内容抓取（Playwright + Readability） | 低风险 |
-| **浏览器接管** | `browser` | 通过本地 Chrome CDP 操作真实浏览器标签页 | 高风险（需审批） |
-
-#### 本地浏览器接管（CDP）
-
-Flash-Claw 会优先尝试接管你本机已开启 CDP 的 Chrome；如果本地 `9222` 端口不可用，会自动拉起一个受控 Chrome 实例再连接。
-
-实现上由 Bun 侧负责会话和端口管理，真实 CDP 操作通过 Node helper 调用 Playwright 完成，避免 Bun 运行时下的 CDP 连接兼容性问题。
-
-当用户明确要求“使用浏览器”完成网页任务时，智能体会优先持续调用 `browser` 执行完整工作流：打开页面、观察页面内容、输入关键词、点击或回车提交、等待结果并读取结果页，而不是只停留在 `goto` 或退化成 `web_search`。
-
-如果你希望显式指定浏览器可执行文件或调试地址，可使用以下环境变量：
+## 配置项
+
+### 模型
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | OpenAI-compatible API Key；也可回退读取 `DASHSCOPE_API_KEY` | 空 |
+| `OPENAI_BASE_URL` | OpenAI-compatible API 地址；也可回退读取 `DASHSCOPE_BASE_URL` | OpenAI SDK 默认值 |
+| `MODEL` | 主模型名；也可回退读取 `OPENAI_MODEL`、`MODEL_NAME` | `gpt-4o-mini` |
+
+### 服务与安全
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `PORT` | HTTP 服务端口 | `3000` |
+| `HOST` | HTTP 绑定地址 | `127.0.0.1` |
+| `NODE_ENV` | 运行环境 | `development` |
+| `LOG_LEVEL` | 日志级别 | `info` |
+| `FLASH_CLAW_API_TOKEN` | 受保护 API 的访问 token；生产环境未配置时保护路由返回 503 | 空 |
+| `FLASH_CLAW_AUTO_APPROVE_TOOLS` | 是否自动执行需要审批的高风险工具 | `false` |
+| `USE_DOCKER_SANDBOX` | 是否启用 Docker 沙箱 | `false` |
+| `SANDBOX_IMAGE` | Docker 沙箱镜像 | `flash-claw-sandbox:latest` |
+| `ALLOWED_PATHS` | 允许工具访问的附加路径，逗号分隔 | 空 |
+
+### 数据与记忆
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `DB_PATH` | DI 数据库路径 | `./data/FlashClaw.db` |
+| `WORKSPACE_PATH` | Markdown 记忆和工作区路径 | `./data/workspace` |
+| `TASKS_JSON_PATH` | 任务 JSON 文件路径 | `./data/cron/jobs.json` |
+| `SESSION_TIMEOUT` | 短期记忆过期时间，毫秒 | `1800000` |
+| `MEM0_BASE_URL` | mem0 LLM 网关覆盖 | 复用主 LLM 配置 |
+| `MEM0_LLM_MODEL` | mem0 LLM 模型覆盖 | 复用主模型 |
+| `MEM0_EMBEDDING_MODE` | `local` 或 `remote` | `local` |
+| `MEM0_LOCAL_MODEL` | 本地 embedding 模型 | `Xenova/multilingual-e5-small` |
+| `MEM0_EMBEDDING_BASE_URL` | 远程 embedding 地址 | `https://api.minimax.io/v1` |
+| `MEM0_EMBEDDING_MODEL` | 远程 embedding 模型 | `embo-01` |
+| `MEM0_COLLECTION` | mem0 collection 名称 | `flash_claw_memories` |
+| `MEM0_HISTORY_DB` | mem0 history DB | `./data/mem0_history.db` |
+| `MEM0_VECTOR_DB` | mem0 vector DB | `./data/mem0_vectors.db` |
+
+### 搜索与浏览器
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| Web 搜索 | 当前内置 DuckDuckGo HTML provider，无需 API Key | — |
+| `BROWSER_CDP_URL` | 本地 Chrome CDP 地址 | `http://127.0.0.1:9222` |
+| `CHROME_PATH` | Chrome 可执行文件路径 | 自动探测 |
+
+### 飞书
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `FEISHU_APP_ID` | legacy 单机器人应用 ID | 空 |
+| `FEISHU_APP_SECRET` | legacy 单机器人应用 Secret | 空 |
+| `FEISHU_WEBHOOK_URL` | legacy 单机器人发送消息 webhook | 空 |
+| `FEISHU_VERIFICATION_TOKEN` | legacy 单机器人事件验证 token | 空 |
+| `FEISHU_ENCRYPT_KEY` | legacy 单机器人事件加密 key | 空 |
+| `FEISHU_MODE` | legacy 连接模式，`webhook` 或 `websocket` | `webhook` |
+| `FEISHU_USE_LONG_CONNECTION` | legacy WebSocket 开关；若设置 `FEISHU_MODE`，以 `FEISHU_MODE` 为准 | `true` |
+| `FEISHU_STREAMING` | legacy 流式卡片开关 | `true` |
+| `FEISHU_SHOW_ELAPSED` | legacy 耗时 footer 开关 | `true` |
+| `FEISHU_BOTS` | 多机器人 JSON 配置，支持对象映射或数组 | 空 |
+| `FEISHU_DEFAULT_BOT_ID` | 多机器人默认 botId | 首个可用 bot |
+
+## 飞书接入
+
+### legacy 单机器人
+
+没有配置 `FEISHU_BOTS` 时，系统会读取旧环境变量创建 `default` 机器人。旧部署只要保留原有 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_WEBHOOK_URL` 等配置即可继续运行。
 
 ```bash
-CHROME_PATH=/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
-BROWSER_CDP_URL=http://127.0.0.1:9222
-```
-
-随后可通过 `browser` 工具执行 `status`、`goto`、`search`、`click`、`type`、`press`、`text`、`html`、`evaluate`、`screenshot`、`wait_for`、`select_tab`、`reset` 等动作。
-
-其中 `search` 适合“打开搜索引擎并输入关键词”的场景，会优先尝试在当前页面或指定 URL 中定位搜索框、输入关键词并提交搜索。
-
-对于百度这类搜索首页，智能体现在会避免先对搜索框单独执行 `click` 作为聚焦步骤；如果模型仍然拆步，浏览器 helper 也会对常见搜索框选择器优先回退到 `focus`，减少页面长时间卡在输入框点击等待上的情况。
-
-`text` 与 `html` 也支持不传 `selector` 直接读取整页内容，便于模型在未知页面结构下先观察页面，再决定后续的输入和点击动作。
-
-#### 工具执行流程
-
-```
-ChatEngine 请求工具调用
-  │
-  ▼
-ToolExecutor（安全检查）
-  ├─ 路径边界检查
-  ├─ 命令安全过滤
-  └─ 速率限制
-  │
-  ▼
-ToolRegistry → 查找工具实现
-  │
-  ▼
-执行工具 → 返回结果
-```
-
-#### Docker 沙箱
-
-对于高风险操作（如 `bash`），可启用 Docker 沙箱隔离：
-
-```bash
-# .env 配置
-USE_DOCKER_SANDBOX=true
-SANDBOX_IMAGE=flash-claw-sandbox:latest
-```
-
----
-
-### 安全层
-
-安全是 Flash-Claw 的核心设计原则之一。多层安全机制协同工作：
-
-| 安全机制 | 模块 | 说明 |
-|----------|------|------|
-| **路径边界检查** | `infra/fs/boundary.ts` | 限制文件操作在允许的目录范围内 |
-| **命令安全过滤** | `security/` | 拦截危险命令（如 `rm -rf /`） |
-| **速率限制** | `security/` | 防止工具调用过于频繁 |
-| **SSRF 防护** | `infra/net/ssrf.ts` | 阻止对内网地址的请求 |
-| **审计日志** | `security/` | 记录所有工具调用与敏感操作 |
-
-生产环境默认要求为管理类 API 配置 `FLASH_CLAW_API_TOKEN`，并通过 `Authorization: Bearer <token>` 或 `X-Flash-Claw-Token` 访问。飞书 webhook、`/health` 与 `/api/status` 仍保持公开，便于外部回调和健康检查。`bash`、文件写入、浏览器等需要审批的工具默认不会暴露给模型，也不会执行；仅在可信本地环境设置 `FLASH_CLAW_AUTO_APPROVE_TOOLS=true` 后启用。
-
----
-
-## Skill 系统
-
-Flash-Claw 的 Skill 系统遵循 **Claude Code Agent Skills 标准**，以 `SKILL.md` 文件定义技能的触发条件、执行逻辑和输出格式。
-
-### 内置 10 个 Skills
-
-| Skill | 说明 |
-|-------|------|
-| `git-commit` | 智能 Git 提交（分析 diff、生成 commit message） |
-| `doc-writer` | 文档生成（README、API 文档、技术方案） |
-| `test-generator` | 测试用例生成 |
-| `code-review` | 代码审查（安全、性能、最佳实践） |
-| `feishu-doc` | 飞书文档操作 |
-| `feishu-drive` | 飞书云盘操作 |
-| `feishu-perm` | 飞书权限管理 |
-| `feishu-wiki` | 飞书知识库操作 |
-| `wechat-fetcher` | 微信公众号内容抓取 |
-| `skill-creator` | Skill 自创建（元技能） |
-
-### Skill 定义格式
-
-每个 Skill 是一个目录，包含 `SKILL.md` 和可选的辅助脚本：
-
-```
-skills/
-├── git-commit/
-│   └── SKILL.md
-├── doc-writer/
-│   └── SKILL.md
-├── test-generator/
-│   └── SKILL.md
-└── ...
-```
-
-`references/` 和 `scripts/` 目录只会加载普通文件；如果目录中包含子目录或资源文件夹，系统会自动跳过，避免影响 `/api/skills` 接口。
-
----
-
-## 任务调度
-
-任务调度系统支持自然语言创建定时任务，底层使用 JSON 文件持久化存储。
-
-### 三种调度模式
-
-| 模式 | 说明 | 示例 |
-|------|------|------|
-| **cron** | 标准 cron 表达式 | `0 9 * * 1-5`（工作日早 9 点） |
-| **interval** | 固定间隔 | 每 30 分钟执行一次 |
-| **one-time** | 一次性定时 | 明天下午 3 点执行 |
-
-### 自然语言解析
-
-用户可以直接用自然语言创建任务，LLM 智能解析意图：
-
-```
-用户：每天早上 9 点帮我检查一下服务器状态
-Flash-Claw：已创建定时任务
-  - 模式：cron
-  - 表达式：0 9 * * *
-  - 描述：检查服务器状态
-```
-
-支持中文、英文等多语言输入。`cronToHumanReadable` 工具可将 cron 表达式转为人类可读描述。
-
----
-
-## 飞书集成
-
-Flash-Claw 现在支持两种配置方式：
-
-- **Legacy 单机器人模式**：继续读取 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 等现有环境变量，不破坏旧部署。
-- **多机器人模式**：通过 `FEISHU_BOTS` 一次注册多个飞书机器人，并由管理器按路由 / `app_id` / token 自动分发。
-
-### 接入模式
-
-无论单机器人还是多机器人，都支持以下两种飞书接入模式：
-
-#### Webhook 模式
-
-- 配置飞书事件订阅回调 URL
-- 适合简单场景，无需维护长连接
-- 支持消息事件、卡片交互
-
-#### WebSocket 长连接模式
-
-- 基于飞书开放平台 WebSocket 协议
-- 多层重试策略：5 次指数退避 + 后台静默重连（每 2 分钟）
-- 连接状态检测：通过 SDK 日志拦截自动判断连接成功/失败
-- 适合高实时性场景
-
-### 会话与记忆隔离
-
-多机器人模式下，飞书消息会自动生成带 `connectorId` 和 `tenantKey` 的隔离 key：
-
-```text
-sessionId = feishu:${connectorId}:${tenantKey}:${chatId}:${userId}
-userId    = feishu:${connectorId}:${tenantKey}:${userId}
-```
-
-- 不同机器人、不同租户、不同群聊不会串会话
-- 长期记忆也按 `userId` 进行隔离，不再落到默认用户
-
-### 单机器人兼容配置
-
-```bash
-# .env
 FEISHU_APP_ID=cli_xxxxx
 FEISHU_APP_SECRET=xxxxx
-FEISHU_ENCRYPT_KEY=xxxxx           # 可选，事件加密
-FEISHU_VERIFICATION_TOKEN=xxxxx    # 可选，事件验证
-
-# 连接模式（二选一）
-FEISHU_MODE=webhook                # 或 websocket
-# 兼容旧配置；若设置了 FEISHU_MODE，则 FEISHU_MODE 优先
-FEISHU_USE_LONG_CONNECTION=false
-
-# 可选：如果使用自定义机器人 webhook 发送消息
+FEISHU_VERIFICATION_TOKEN=xxxxx
+FEISHU_ENCRYPT_KEY=xxxxx
+FEISHU_MODE=webhook
 FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-
-# 流式卡片（单机器人 legacy 开关）
-FEISHU_STREAMING=true
-FEISHU_SHOW_ELAPSED=true
 ```
 
-### 多机器人配置
+### 多机器人
+
+`FEISHU_BOTS` 支持对象映射：
 
 ```bash
-# .env
 FEISHU_DEFAULT_BOT_ID=ops
 FEISHU_BOTS='{
   "ops": {
     "appId": "cli_ops_xxxxx",
     "appSecret": "ops_secret",
     "verificationToken": "ops_token",
-    "useLongConnection": false,
+    "mode": "webhook",
     "enableStreaming": true,
     "showElapsed": true
   },
@@ -594,326 +192,203 @@ FEISHU_BOTS='{
     "appId": "cli_sales_xxxxx",
     "appSecret": "sales_secret",
     "verificationToken": "sales_token",
-    "useLongConnection": true,
+    "mode": "websocket",
     "enableStreaming": true,
     "showElapsed": true
   }
 }'
 ```
 
-- 命名回调路由使用 `/api/webhooks/feishu/:botId`
-- 不带 `:botId` 的回调会优先按 `header.app_id` / token 自动识别；识别失败时回退到 `FEISHU_DEFAULT_BOT_ID`
-- `FEISHU_BOTS` 支持 JSON 数组或对象映射；对象 key 会作为 `botId`
+也支持数组形式：
 
-### 流式卡片输出
-
-飞书消息支持流式卡片模式，用户发送消息后可实时看到 AI 逐字回复（打字机效果），并在回复底部显示耗时统计。
-
-- 流式路径会继续执行 Tool Calling，`browser`、`web_search`、任务调度等能力在飞书流式模式下同样可用
-- 多机器人模式下可在每个 bot 的配置里独立设置 `enableStreaming` / `showElapsed`
-
-#### 双模式自动切换
-
-| 模式 | API | 权限要求 | QPS 限制 | 节流间隔 |
-|------|-----|----------|----------|----------|
-| **CardKit**（首选） | `cardkit/v1/cards` | `cardkit:card:write` | 无限制 | 300ms |
-| **Message PATCH**（降级） | `im/v1/messages/:id` PATCH | `im:message` | 5 QPS | 1500ms |
-
-- 首次调用 CardKit API 时若权限不足（错误码 `99991672`），自动且永久切换为 PATCH 模式
-- 回复底部自动添加 `⏱ 耗时 X.Xs · FlashClaw` footer
-
-### 配置摘要
-
-```bash
-# 默认路由
-POST /api/webhooks/feishu
-
-# 多机器人命名路由
-POST /api/webhooks/feishu/:botId
-
-# 兼容旧路径
-POST /api/feishu/webhook
-POST /api/feishu/webhook/:botId
+```json
+[
+  { "id": "ops", "appId": "cli_ops", "appSecret": "secret", "isDefault": true },
+  { "id": "notice", "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx" }
+]
 ```
 
----
+路由选择顺序：
 
-## Heartbeat 心跳系统
+1. URL 中显式 `:botId`。
+2. 飞书事件里的 `app_id`。
+3. 飞书事件里的 token。
+4. `FEISHU_DEFAULT_BOT_ID` 或默认机器人。
 
-心跳系统提供定期健康检查与自动恢复能力：
+多机器人模式下，飞书入口会向对话引擎传入隔离后的身份：
 
-- 定时检查各服务组件的运行状态
-- 异常时自动尝试恢复
-- 通过事件总线广播健康状态变化
-- 集成到 DI 容器，随应用生命周期启停
+```text
+sessionId = feishu:${connectorId}:${tenantKey}:${chatId}:${sender}
+userId    = feishu:${connectorId}:${tenantKey}:${sender}
+```
 
----
+这样不同机器人、租户、群聊和用户不会串会话，也不会把长期记忆写入默认用户。
 
-## API 接口
+## HTTP API
 
-### 对话
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/chat` | 发送对话消息 |
-| `POST` | `/api/chat/stream` | 流式对话（SSE） |
-| `GET` | `/api/chat/history` | 获取对话历史 |
-| `DELETE` | `/api/chat/history` | 清除对话历史 |
-
-### 记忆
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/memory` | 获取记忆列表 |
-| `POST` | `/api/memory` | 写入记忆 |
-| `DELETE` | `/api/memory/:id` | 删除指定记忆 |
-| `GET` | `/api/memory/search` | 搜索记忆 |
-
-### 任务
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/tasks` | 获取任务列表 |
-| `POST` | `/api/tasks` | 创建任务 |
-| `PUT` | `/api/tasks/:id` | 更新任务 |
-| `DELETE` | `/api/tasks/:id` | 删除任务 |
-
-### 工具
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/tools` | 获取可用工具列表 |
-| `POST` | `/api/tools/execute` | 执行指定工具 |
+`GET /`、`GET /health`、`GET /api/status` 和飞书 webhook POST 路由公开。其他 API 在生产环境需要 `FLASH_CLAW_API_TOKEN`，通过 `Authorization: Bearer <token>` 或 `X-Flash-Claw-Token` 传入。
 
 ### 系统
 
 | 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/health` | 健康检查 |
-| `GET` | `/api/status` | 系统状态 |
+| --- | --- | --- |
+| `GET` | `/` | 文本健康入口 |
+| `GET` | `/health` | JSON 健康检查 |
+| `GET` | `/api/status` | Web 前端使用的模型与后端状态摘要 |
+
+### 对话
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/chat` | 发送对话消息 |
+| `POST` | `/api/chat/clear` | 清除指定 `sessionId` 的会话 |
+
+### Skill
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/skills` | 列出所有 Skill，支持 `q` 查询 |
+| `GET` | `/api/skills/:name` | 获取指定 Skill |
+| `POST` | `/api/skills/:name/exec` | 执行 Skill `scripts/` 下的脚本 |
 
 ### 飞书
 
 | 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/webhooks/feishu` | 默认 / 自动识别飞书事件回调 |
-| `POST` | `/api/webhooks/feishu/:botId` | 指定机器人事件回调 |
-| `GET` | `/api/webhooks/feishu/status` | 飞书机器人总状态 |
+| --- | --- | --- |
+| `GET` | `/api/webhooks/feishu/status` | 默认飞书状态 |
 | `GET` | `/api/webhooks/feishu/:botId/status` | 指定机器人状态 |
-| `POST` | `/api/feishu/webhook` | 旧路径别名 |
-| `POST` | `/api/feishu/webhook/:botId` | 旧路径别名 |
+| `POST` | `/api/webhooks/feishu` | 自动识别 / 默认飞书 webhook |
+| `POST` | `/api/webhooks/feishu/:botId` | 指定机器人 webhook |
+| `GET` | `/api/feishu/webhook/status` | legacy 状态路径 |
+| `GET` | `/api/feishu/webhook/:botId/status` | legacy 指定机器人状态路径 |
+| `POST` | `/api/feishu/webhook` | legacy webhook 路径 |
+| `POST` | `/api/feishu/webhook/:botId` | legacy 指定机器人 webhook 路径 |
 
----
+### 任务
 
-## CLI 命令
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/tasks` | 列出任务 |
+| `POST` | `/api/tasks` | 创建 cron 或一次性任务 |
+| `GET` | `/api/tasks/:id` | 获取任务详情 |
+| `PATCH` | `/api/tasks/:id` | 更新任务 |
+| `DELETE` | `/api/tasks/:id` | 删除任务 |
+| `POST` | `/api/tasks/:id/run` | 立即执行任务 |
+| `GET` | `/api/tasks/:id/runs` | 获取任务执行记录 |
+
+### 心跳与子代理
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/heartbeat/status` | 心跳状态 |
+| `POST` | `/api/heartbeat/trigger` | 手动触发心跳 |
+| `GET` | `/api/heartbeat/file` | 读取 `HEARTBEAT.md` |
+| `POST` | `/api/heartbeat/file` | 写入 `HEARTBEAT.md` |
+| `GET` | `/api/subagents` | 列出子代理运行记录 |
+| `GET` | `/api/subagents/:id` | 获取子代理详情 |
+| `DELETE` | `/api/subagents/:id` | 停止子代理 |
+
+## CLI
+
+项目的 npm scripts：
 
 ```bash
-# 开发模式（后端 + 前端热重载）
 bun run dev
-
-# 构建前端
-bun run build:web
-
-# 生产模式启动
 bun run start
-
-# 发布新版本
-bun run release
-
-# 运行测试
-bun run test
-
-# 单次运行测试（不 watch）
-bun run test:run
-
-# 类型检查
+bun run build:web
 bun run typecheck
-
-# 额外死代码检查
-bun run typecheck -- --noUnusedLocals true --noUnusedParameters true
+bun run test
+bun run test:run
+bun run release
 ```
 
----
+安装为 bin 后可用的 CLI：
+
+```bash
+flashclaw run
+flashclaw tasks
+flashclaw tasks --cleanall
+flashclaw tasks --run <id>
+flashclaw skills
+flashclaw skills <name>
+flashclaw subagents
+flashclaw subagents <id>
+flashclaw subagents --kill <id>
+```
 
 ## 项目结构
 
-```
+```text
 flash-claw/
+├── AGENTS.md                    # 统一 Agent 执行契约
+├── CLAUDE.md -> AGENTS.md       # Claude 入口软链，避免规则漂移
+├── docs/                        # 规则库、知识库、验证矩阵
+├── scripts/                     # 构建、发布、SDK patch、浏览器 helper
 ├── src/
-│   ├── core/
-│   │   └── container/               # DI 容器系统
-│   │       ├── container.ts          #   IoC 容器（循环检测、生命周期、有序销毁）
-│   │       ├── tokens.ts             #   27 个接口 + 24 个 ServiceToken
-│   │       ├── bootstrap.ts          #   服务注册与启动引导
-│   │       └── types.ts              #   基础类型定义
-│   │
-│   ├── chat/                         # 对话引擎
-│   │   ├── engine.ts                 #   ChatEngine 核心（多步工具循环）
-│   │   ├── chatStream.ts             #   流式 LLM 调用（OpenAI stream: true）
-│   │   ├── llm-parser.ts            #   LLM 智能任务解析 + 记忆查询重写
-│   │   └── parsers.ts               #   cronToHumanReadable 等工具函数
-│   │
-│   ├── memory/                       # 四级记忆系统
-│   │   ├── working-memory.ts         #   T0 工作记忆（内存，会话级）
-│   │   ├── short-term-memory.ts      #   T1 短期记忆（SQLite，30 分钟过期）
-│   │   ├── mem0-memory-manager.ts    #   T2 mem0 记忆（SQLite 向量库，永久）
-│   │   ├── markdown-memory.ts        #   T3 Markdown 记忆（文件，永久）
-│   │   ├── memory-manager.ts         #   记忆管理门面
-│   │   ├── long-term-memory.ts       #   长期记忆
-│   │   ├── vector-store.ts           #   向量存储（混合搜索 + MMR 重排序）
-│   │   ├── context-budget.ts         #   上下文令牌预算分配
-│   │   ├── user-profile.ts           #   用户画像
-│   │   ├── daily-summarizer.ts       #   每日摘要器
-│   │   └── embedding/                #   嵌入服务
-│   │
-│   ├── tools/                        # 工具系统
-│   │   ├── builtin/                  #   内置工具实现
-│   │   ├── tool-registry.ts          #   工具注册表
-│   │   ├── tool-executor.ts          #   工具执行器（含安全层）
-│   │   └── sandbox/                  #   Docker 沙箱支持
-│   │
-│   ├── evolution/                    # 自进化系统
-│   │   ├── evolution-engine.ts       #   进化引擎核心
-│   │   ├── feedback-analyzer.ts      #   对话反馈分析（规则 + LLM 双引擎）
-│   │   ├── strategy-planner.ts       #   进化策略规划
-│   │   └── types.ts                  #   类型定义
-│   │
-│   ├── agent/                        # 智能体
-│   │   └── prompt-builder.ts         #   提示词构建器（令牌预算分配）
-│   │
-│   ├── skills/                       # Skill 系统（Claude Code Agent Skills 标准）
-│   │   ├── git-commit/
-│   │   ├── doc-writer/
-│   │   ├── test-generator/
-│   │   ├── code-review/
-│   │   ├── feishu-doc/
-│   │   ├── feishu-drive/
-│   │   ├── feishu-perm/
-│   │   ├── feishu-wiki/
-│   │   ├── wechat-fetcher/
-│   │   └── skill-creator/
-│   │
-│   ├── tasks/                        # 任务调度系统
-│   │                                 #   JSON 存储 / cron+interval+one-time
-│   │
-│   ├── integrations/                 # 飞书集成
-│   │   ├── feishu.ts                 #   FeishuBot（单 bot 实例，负责会话/记忆隔离）
-│   │   ├── feishu-manager.ts         #   多飞书机器人管理器与路由分发
-│   │   └── feishu-streaming-card.ts  #   流式卡片服务（CardKit + PATCH 双模式）
-│   │
-│   ├── heartbeat/                    # 心跳系统
-│   │
-│   ├── subagents/                    # 子智能体系统
-│   │
-│   ├── security/                     # 安全层
-│   │                                 #   路径边界、命令安全、速率限制、审计日志
-│   │
-│   ├── infra/                        # 基础设施
-│   │   ├── hono-app.ts               #   HTTP 服务器（Hono）
-│   │   ├── error-handler.ts          #   全局错误处理
-│   │   ├── fs/
-│   │   │   └── boundary.ts           #   文件系统边界检查
-│   │   └── net/
-│   │       └── ssrf.ts               #   SSRF 防护
-│   │
-│   ├── web/                          # React 前端（Vite）
-│   │
-│   └── config/                       # 配置
-│       └── config.ts                 #   应用配置（被 bootstrap 引用）
-│
-├── data/                             # 运行时数据（自动生成）
+│   ├── index.ts                 # Bun 服务启动入口，加载 .env 并启动 Hono
+│   ├── cli.ts                   # flashclaw CLI
+│   ├── core/container/          # DI 容器、token、bootstrap
+│   ├── infra/                   # Hono app、LLM 配置、FS/网络边界
+│   ├── chat/                    # 对话引擎、流式调用、LLM parser
+│   ├── agent/                   # PromptBuilder
+│   ├── memory/                  # 四级记忆、mem0、embedding、vector store
+│   ├── tools/                   # 工具注册、执行、内置工具、sandbox
+│   ├── skills/                  # Skill 加载、搜索和脚本执行实现
+│   ├── integrations/            # 飞书机器人、manager、流式卡片
+│   ├── tasks/                   # JSON 文件任务调度
+│   ├── heartbeat/               # 心跳系统
+│   ├── security/                # 安全层
+│   ├── subagents/               # 子代理运行管理
+│   ├── evolution/               # 反馈分析和自进化策略
+│   └── web/                     # React + Vite 前端
+├── tests/                       # Bun 测试
+├── data/                        # 运行时数据，勿提交
+├── .env.example                 # 环境变量模板
 ├── package.json
 ├── tsconfig.json
-├── vite.config.ts
-└── README.md
+└── vite.config.mts
 ```
 
----
+## 文档与开发规则
 
-## 环境变量
+`AGENTS.md` 是本项目唯一 Agent 规则入口；`CLAUDE.md` 通过软链指向它。开始修改代码前先读 `AGENTS.md`，再按任务范围阅读 `docs/README.md` 的索引。
 
-### 必需
+常用文档：
 
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `OPENAI_API_KEY` | OpenAI-compatible 服务 API Key | `sk-xxxxx` |
+- `docs/rules/development-guide.md`：开发规范、交付约束、文档同步和提交流程。
+- `docs/test/verification-matrix.md`：按变更类型选择验证命令。
+- `docs/knowledge-base/project-overview.md`：项目结构和核心子系统。
+- `docs/knowledge-base/feishu-integration.md`：飞书单/多机器人、路由和会话/记忆隔离。
+- `docs/knowledge-base/skills-and-tools.md`：Skill、工具、安全边界。
+- `docs/channel-shared-memory-design.md`：多 channel 共享长期记忆设计草案。
 
-### AI 模型
+每次代码变更必须同步更新 `README.md` 和 `CHANGELOG.md`，并在验证通过后提交、推送。
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `MODEL` | 主模型名称 | `gpt-4o-mini` |
-| `OPENAI_BASE_URL` | OpenAI 兼容 API 地址；OpenAI 官方可留空或填 `https://api.openai.com/v1` | `https://api.openai.com/v1` |
-| `OPENAI_MODEL` | 模型名别名，低优先级回退 | — |
-| `MODEL_NAME` | 兼容旧配置的模型名别名，低优先级回退 | — |
+## 验证
 
-### 工具 API
+基础命令：
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `TAVILY_API_KEY` | Tavily 搜索 API Key | — |
+```bash
+bun run typecheck
+bun test --run
+bun run build:web
+```
 
-### 飞书
+额外未使用代码检查：
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `FEISHU_APP_ID` | 飞书应用 ID | — |
-| `FEISHU_APP_SECRET` | 飞书应用 Secret | — |
-| `FEISHU_BOTS` | 多机器人 JSON 配置（数组或对象映射） | — |
-| `FEISHU_DEFAULT_BOT_ID` | 多机器人默认 botId | 首个可用 bot |
-| `FEISHU_ENCRYPT_KEY` | 事件加密 Key | — |
-| `FEISHU_VERIFICATION_TOKEN` | 事件验证 Token | — |
-| `FEISHU_MODE` | Legacy 单机器人连接模式（`webhook` / `websocket`） | `webhook` |
-| `FEISHU_USE_LONG_CONNECTION` | Legacy 单机器人长连接开关 | `true` |
-| `FEISHU_WEBHOOK_URL` | Legacy 单机器人发送消息的 webhook URL | — |
-| `FEISHU_STREAMING` | Legacy 单机器人流式开关 | `true` |
-| `FEISHU_SHOW_ELAPSED` | Legacy 单机器人耗时 footer 开关 | `true` |
+```bash
+bun run typecheck -- --noUnusedLocals true --noUnusedParameters true
+```
 
-### 服务器
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `PORT` | HTTP 服务端口 | `3000` |
-| `HOST` | 绑定地址；默认仅监听本机，确需外部访问再改为 `0.0.0.0` | `127.0.0.1` |
-
-### 安全
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `FLASH_CLAW_API_TOKEN` | 生产环境访问受保护 API 的 Bearer token；未配置时生产环境保护路由返回 503 | — |
-| `FLASH_CLAW_AUTO_APPROVE_TOOLS` | 是否自动执行需要审批的工具；只建议可信本地环境开启 | `false` |
-| `USE_DOCKER_SANDBOX` | 是否启用 Docker 沙箱 | `false` |
-| `SANDBOX_IMAGE` | 沙箱 Docker 镜像 | `flash-claw-sandbox:latest` |
-| `ALLOWED_PATHS` | 允许操作的路径（逗号分隔） | — |
-
-### 记忆
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `EMBEDDING_MODEL` | Embedding 模型 | `Xenova/multilingual-e5-small` |
-| `DATA_DIR` | 数据存储目录 | `./data` |
-
----
+不同变更类型的验证组合见 `docs/test/verification-matrix.md`。
 
 ## 发布
 
-使用内置的发布脚本：
-
 ```bash
-# 发布新版本（自动 bump 版本号、生成 changelog、打 tag）
 bun run release
 ```
 
-发布流程：
-1. 运行类型检查（`typecheck`）
-2. 运行测试（`test:run`）
-3. 构建前端（`build:web`）
-4. 更新版本号
-5. 生成 Changelog
-6. 创建 Git Tag
-7. 推送到远程仓库
-
----
+当前 release 脚本会根据工作区改动生成 `CHANGELOG.md` 片段，然后执行 `git add -A`、commit 和 push。使用前先确认工作区没有无关改动，避免误提交本地文件。
 
 ## 许可证
 

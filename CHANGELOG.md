@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-05-04 (31)
+
+### docs: 校准 README 到当前代码事实
+
+- 将 README 从历史堆叠式说明收敛为当前项目入口文档，更新仓库地址、快速开始、配置项、HTTP API、CLI、项目结构和验证说明。
+- 移除 README 中已偏移的旧 API 表、旧 `src/config/config.ts` 结构说明、固定内置 Skill 清单、Tavily 配置残留和过期 Web UI 优化流水账。
+- 明确 Skill 动态发现路径、飞书 legacy / 多机器人配置、API token gate、默认本机监听和 release 脚本的实际行为。
+
 ## 2026-05-03 (30)
 
 ### cleanup: 删除编译器可证明的无用代码
